@@ -21,9 +21,13 @@ fn show_img(path: string) -> int {
 
 fn main() -> int {
     let av = args();
+    var with_music = true;
     var i = 0;
     while (i < av.len()) {
         let a = av[i];
+        if (a == "--no-music") {
+            with_music = false;
+        }
         if (a == "--img") {
             if (i + 1 >= av.len()) {
                 eprint("rallyx: --img needs a PNG file");
@@ -35,12 +39,13 @@ fn main() -> int {
             random.seed(42);
         }
         if (a == "--help" || a == "-h") {
-            eprint("usage: rallyx [--seed] [--img file.png]");
+            eprint("usage: rallyx [--seed] [--no-music] [--img file.png]");
             eprint("  ↑↓←→ conducir · espacio humo · p pausa · r reiniciar · q salir");
             eprint("  --img: dibuja un PNG en el terminal (half-blocks truecolor) y sale");
+            eprint("  --no-music: sin música (o si no hay ffplay, calla solo)");
             return 0;
         }
         i = i + 1;
     }
-    app.play()
+    app.play(with_music)
 }

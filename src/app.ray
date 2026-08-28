@@ -10,6 +10,8 @@ import rally;
 import screen;
 import png;
 import sprite;
+import music;
+import wsg;
 
 const FRAME_MS: int = 33;
 
@@ -48,6 +50,36 @@ struct App {
     hiscore: int,
     paused: bool,
     quit: bool,
+    music: music.Music,
+    danger: bool,
+    prev_score: int,
+    prev_lives: int,
+    prev_over: bool,
+}
+
+// Translate game-state deltas into music events: flag jingle on a score
+// jump, crash sweep on a lost life, the farewell on game over, and the
+// siren while a live chaser is close.
+fn sync_music(a: App) {
+    if (a.g.score > a.prev_score && !a.g.over) {
+        music.send_event(a.music, wsg.EV_FLAG);
+    }
+    if (a.g.lives < a.prev_lives && !a.g.over) {
+        music.send_event(a.music, wsg.EV_CRASH);
+    }
+    if (a.g.over && !a.prev_over) {
+        music.send_event(a.music, wsg.EV_OVER);
+    }
+    if (!a.g.over) {
+        let d = rally.danger(a.g);
+        if (d != a.danger) {
+            a.danger = d;
+            music.send_event(a.music, if (d) { wsg.EV_DANGER_ON } else { wsg.EV_DANGER_OFF });
+        }
+    }
+    a.prev_score = a.g.score;
+    a.prev_lives = a.g.lives;
+    a.prev_over = a.g.over;
 }
 
 fn repaint(a: App) {
@@ -80,6 +112,11 @@ fn on_key(a: App, k: Key) {
             } else if (c == 'r') {
                 if (a.g.over) {
                     a.g = rally.new_game();
+                    a.danger = false;
+                    a.prev_score = 0;
+                    a.prev_lives = a.g.lives;
+                    a.prev_over = false;
+                    music.send_event(a.music, wsg.EV_RESET);
                 }
             }
         },
@@ -154,16 +191,9 @@ fn splash() {
     write_now(e + "[2J");
 }
 
-fn event_loop() -> int {
+fn event_loop(with_music: bool) -> int {
     var empty: [string] = [];
-    let a = App {
-        g: rally.new_game(),
-        prev: empty,
-        pending: b"",
-        hiscore: load_hiscore(),
-        paused: false,
-        quit: false
-    };
+    let a = App { g: rally.new_game(), prev: empty, pending: b"", hiscore: load_hiscore(), paused: false, quit: false, music: if (with_music) { music.start() } else { music.off() }, danger: false, prev_score: 0, prev_lives: 3, prev_over: false };
     let e = screen.esc();
     write_now(e + "[?1049h" + e + "[?25l" + e + "[2J" + e + "[H");
     splash();
@@ -184,6 +214,7 @@ fn event_loop() -> int {
                 next_enemy = now + rally.enemy_ms(a.g);
                 note_score(a);
             }
+            sync_music(a);
         }
         var wait = next_frame - time.monotonic();
         if (wait < 1) {
@@ -207,6 +238,7 @@ fn event_loop() -> int {
             }
         }
     }
+    music.stop(a.music);
     write_now(e + "[?1049l" + e + "[?25h");
     print(
         "score " + to_string(a.g.score) + " · round " + to_string(a.g.round) + " · hi " + to_string(a.hiscore)
@@ -214,12 +246,12 @@ fn event_loop() -> int {
     0
 }
 
-pub fn play() -> int {
+pub fn play(with_music: bool) -> int {
     if (!term.is_tty(0) || !term.is_tty(1)) {
         eprint("rallyx: needs a terminal");
         return 1;
     }
-    match (term.raw(fn() -> int { event_loop() })) {
+    match (term.raw(fn() -> int { event_loop(with_music) })) {
         Result.Ok(code) => code,
         Result.Err(e) => {
             eprint("rallyx: " + e);

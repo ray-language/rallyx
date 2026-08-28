@@ -6,7 +6,21 @@ Rally-X de terminal a 30 fps, escrito en [raylang](https://github.com/ray-langua
 $ rallyx             # ↑↓←→ conducir · espacio humo · p pausa · r reiniciar · q salir
 $ rallyx --seed      # ciudad determinista (banderas/rocas con semilla fija)
 $ rallyx --img f.png # dibuja cualquier PNG en el terminal (half-blocks truecolor) y sale
+$ rallyx --no-music  # sin música (sin ffplay instalado, calla solo)
+$ ray run tools/play_demo.ray  # tour audible de la partitura reactiva (~6 s)
 ```
+
+**Música reactiva estilo Namco WSG**, sintetizada en vivo y servida a un
+`ffplay` persistente por `stdin_pipe` (M100 v3): 3 voces de wavetable de 32
+entradas × 4 bits (`src/wsg.ray`, puro y determinista — la partitura se
+testea byte a byte), mezcladas a s16le 22050 Hz por una fibra (`src/music.ray`)
+que empuja un paso de 110 ms por escritura. El juego le manda eventos por
+canal: **sirena** cuando un rojo vivo está a ≤6 celdas, **jingle** al coger
+bandera, **barrido** al chocar, **despedida** en el game over y reset con `r`.
+La clave del patrón: la contrapresión de `Proc.write` es la red de seguridad,
+pero el *pacing* lo lleva un reloj absoluto que mantiene solo ~250 ms de
+audio por delante — con contrapresión sola, la sirena llegaría con el pipe
+entero (~1.5 s) de retraso.
 
 Con `std/inflate` en el lenguaje, rallyx trae ahora un **codec PNG puro en
 raylang** (`src/png.ray`: IDAT vía `zlib_inflate`, filtros 0–4, RGB/RGBA/
@@ -71,9 +85,10 @@ La disciplina de raygame (Tetris), con un reloj más y una cámara:
 | Binario nativo (jugado bajo pty) | ✅ |
 | Codec PNG puro (decode 2/3/6 + filtros 0–4; encode stored+CRC) | ✅ |
 | Sprites half-block truecolor: splash con el coche + visor `--img` | ✅ |
-| Tests (reglas + volante + cámara + frame + codec PNG + sprites) | ✅ 16 |
+| Música WSG reactiva en vivo (sirena/jingle/choque/game over) vía `stdin_pipe` | ✅ |
+| Tests (reglas + volante + cámara + frame + codec PNG + sprites + sinte) | ✅ 23 |
 | Bache que frena, persecución con lookahead (BFS), túneles laterales | 📋 v2 |
-| Sprites en celda de juego, música WSG vía `stdin_pipe` + ffplay | 📋 v2 |
+| Sprites en celda de juego, efectos de sonido puntuales (humo, motor) | 📋 v2 |
 
 ## Hallazgos de dogfood
 
@@ -99,6 +114,16 @@ La disciplina de raygame (Tetris), con un reloj más y una cámara:
    funciona hoy), y el FFI existe desde M41 — lo no bindeable es solo el
    audio *pull* de CoreAudio (sin callbacks C→raylang); ALSA (push) sí.
    La asimetría macOS/Linux es el argumento real para un `std/audio`.
+6. **El patrón `stdin_pipe` validado E2E** (VM y nativo, bajo pty, sin
+   zombies de ffplay al salir): `write` con contrapresión funciona tal cual
+   promete el REFERENCE, y la lección de dogfood es que para audio *reactivo*
+   la contrapresión no basta como reloj — un pipe de 64 KB son ~1.5 s de
+   audio a 22050 Hz mono, así que los eventos sonarían un pipe tarde. Reloj
+   absoluto + adelanto acotado (~250 ms) es el patrón. Dos detalles de
+   lenguaje: `Channel.bounded` necesita anotación de tipo en el `let` (el
+   build nativo lo exige; los tests VM nunca compilaron ese módulo), y la
+   doc de `spawn` aún dice "Requires the VM engine" — otro caso de la nota
+   estale "VM only" (funciona nativo, validado aquí).
 
 ## Desarrollo
 

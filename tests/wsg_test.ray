@@ -1,0 +1,150 @@
+// The WSG synth and its reactive tracker, byte-deterministic: pitch table,
+// step rendering, event-driven states, and the danger predicate in rally.
+import std/random;
+import rally;
+import wsg;
+
+fn s16_at(b: bytes, i: int) -> int {
+    let v = b[i * 2] | b[i * 2 + 1] << 8;
+    if (v >= 32768) { v - 65536 } else { v }
+}
+
+@test
+fn pitch_table_hits_the_tuning_anchors() {
+    assert_eq(wsg.freq_of(69), 440);
+    assert_eq(wsg.freq_of(57), 220);
+    assert_eq(wsg.freq_of(81), 880);
+    assert_eq(wsg.freq_of(60), 262);
+    assert_eq(wsg.freq_of(72), 524);
+}
+
+@test
+fn a_tick_is_one_step_of_s16le_within_range() {
+    let t = wsg.new_tracker();
+    let b = wsg.tick(t);
+    assert_eq(b.len(), wsg.SAMPLES_PER_STEP * 2);
+    var peak = 0;
+    var nonzero = 0;
+    var i = 0;
+    while (i < wsg.SAMPLES_PER_STEP) {
+        var s = s16_at(b, i);
+        if (s < 0) {
+            s = 0 - s;
+        }
+        if (s > peak) {
+            peak = s;
+        }
+        if (s != 0) {
+            nonzero = nonzero + 1;
+        }
+        i = i + 1;
+    }
+    assert(nonzero > 100);
+    assert(peak < 32000);
+}
+
+@test
+fn the_score_is_deterministic() {
+    let a = wsg.new_tracker();
+    let b = wsg.new_tracker();
+    var i = 0;
+    while (i < 8) {
+        let ba = wsg.tick(a);
+        let bb = wsg.tick(b);
+        assert_eq(ba, bb);
+        i = i + 1;
+    }
+    wsg.apply(a, wsg.EV_DANGER_ON);
+    wsg.apply(b, wsg.EV_DANGER_ON);
+    assert_eq(wsg.tick(a), wsg.tick(b));
+}
+
+@test
+fn danger_changes_the_mix_and_turns_back_off() {
+    let calm = wsg.new_tracker();
+    let tense = wsg.new_tracker();
+    wsg.apply(tense, wsg.EV_DANGER_ON);
+    assert(wsg.tick(calm) != wsg.tick(tense));
+    // Off before any phase history diverges: identical to a calm tracker.
+    let back = wsg.new_tracker();
+    wsg.apply(back, wsg.EV_DANGER_ON);
+    wsg.apply(back, wsg.EV_DANGER_OFF);
+    let fresh = wsg.new_tracker();
+    assert_eq(wsg.tick(fresh), wsg.tick(back));
+}
+
+@test
+fn game_over_descends_then_falls_silent_and_reset_revives() {
+    let t = wsg.new_tracker();
+    wsg.apply(t, wsg.EV_OVER);
+    var i = 0;
+    while (i < 12) {
+        wsg.tick(t);
+        i = i + 1;
+    }
+    let silent = wsg.tick(t);
+    var all_zero = true;
+    i = 0;
+    while (i < silent.len()) {
+        if (silent[i] != 0) {
+            all_zero = false;
+        }
+        i = i + 1;
+    }
+    assert(all_zero);
+    wsg.apply(t, wsg.EV_RESET);
+    let alive = wsg.tick(t);
+    var nonzero = 0;
+    i = 0;
+    while (i < alive.len()) {
+        if (alive[i] != 0) {
+            nonzero = nonzero + 1;
+        }
+        i = i + 1;
+    }
+    assert(nonzero > 100);
+}
+
+@test
+fn flag_jingle_and_crash_sweep_expire_on_their_own() {
+    let plain = wsg.new_tracker();
+    let flagged = wsg.new_tracker();
+    wsg.apply(flagged, wsg.EV_FLAG);
+    var i = 0;
+    while (i < 4) {
+        assert(wsg.tick(plain) != wsg.tick(flagged));
+        i = i + 1;
+    }
+    // Jingle spent on its own (phase history keeps the raw bytes apart).
+    assert_eq(flagged.jingle, 0);
+    let crashed = wsg.new_tracker();
+    wsg.apply(crashed, wsg.EV_CRASH);
+    i = 0;
+    while (i < 6) {
+        wsg.tick(crashed);
+        i = i + 1;
+    }
+    // The sweep expired; phases differ but the state is back to the tune.
+    assert(!crashed.over);
+    assert_eq(crashed.crash, 0);
+}
+
+@test
+fn danger_predicate_sees_only_live_nearby_chasers() {
+    random.seed(7);
+    let g = rally.new_game();
+    var no_rocks: [(int, int)] = [];
+    g.rocks = no_rocks;
+    g.player.x = 10;
+    g.player.y = 10;
+    g.enemies = [rally.Car { x: 14, y: 10, dir: rally.LEFT, stun: 0 }];
+    assert(rally.danger(g));
+    g.enemies[0].stun = 3;
+    assert(!rally.danger(g));
+    g.enemies[0].stun = 0;
+    g.enemies[0].x = 20;
+    assert(!rally.danger(g));
+    g.over = true;
+    g.enemies[0].x = 11;
+    assert(!rally.danger(g));
+}

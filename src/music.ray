@@ -1,0 +1,117 @@
+// rallyx — the reactive music pump: a fiber synthesizes WSG steps and
+// streams them into a live ffplay via stdin_pipe. Proc.write's backpressure
+// (the fiber parks when the pipe is full) is the safety net; the actual
+// pacing is an absolute clock that keeps only LEAD_MS of audio ahead of
+// real time — that is what makes the siren react NOW and not a pipe-buffer
+// later. Game events arrive through a channel; EOF (close_stdin) or a dead
+// ffplay end the fiber cleanly.
+import std/process;
+import std/time;
+import wsg;
+
+const LEAD_MS: int = 250;
+
+pub struct Music {
+    ch: Channel<int>,
+    on: bool,
+}
+
+pub fn off() -> Music {
+    let ch: Channel<int> = Channel.bounded(1);
+    Music { ch: ch, on: false }
+}
+
+pub fn start() -> Music {
+    let ch: Channel<int> = Channel.bounded(32);
+    let spawned = process
+        .cmd("ffplay", [
+        "-nodisp",
+        "-autoexit",
+        "-loglevel",
+        "quiet",
+        "-probesize",
+        "32",
+        "-analyzeduration",
+        "0",
+        "-f",
+        "s16le",
+        "-ar",
+        "22050",
+        "-ch_layout",
+        "mono",
+        "-i",
+        "-"
+    ])
+        .stdin_pipe()
+        .stream();
+    match (spawned) {
+        Result.Ok(p) => {
+            spawn(fn() {
+                pump(p, ch);
+            });
+            Music { ch: ch, on: true }
+        },
+        Result.Err(e) => {
+            // No ffplay around: the game plays silent, nothing else changes.
+            off()
+        },
+    }
+}
+
+pub fn send_event(m: Music, ev: int) {
+    if (m.on) {
+        send(m.ch, ev);
+    }
+}
+
+pub fn stop(m: Music) {
+    if (m.on) {
+        send(m.ch, wsg.EV_STOP);
+    }
+}
+
+fn pump(p: process.Proc, ch: Channel<int>) {
+    let t = wsg.new_tracker();
+    let t0 = time.monotonic();
+    var steps = 0;
+    var running = true;
+    while (running) {
+        var draining = true;
+        while (draining) {
+            match (try_recv(ch)) {
+                Received.Got(ev) => {
+                    if (ev == wsg.EV_STOP) {
+                        running = false;
+                        draining = false;
+                    } else {
+                        wsg.apply(t, ev);
+                    }
+                },
+                Received.Empty => {
+                    draining = false;
+                },
+                Received.Closed => {
+                    running = false;
+                    draining = false;
+                },
+            }
+        }
+        if (running) {
+            let ahead = steps * wsg.STEP_MS - (time.monotonic() - t0);
+            if (ahead > LEAD_MS) {
+                time.sleep(ahead - LEAD_MS);
+            }
+            match (p.write(wsg.tick(t))) {
+                Result.Ok(n) => { },
+                Result.Err(dead) => {
+                    // ffplay died or closed its end: fall silent, don't crash
+                    // the game.
+                    running = false;
+                },
+            }
+            steps = steps + 1;
+        }
+    }
+    p.close_stdin();
+    p.wait();
+}

@@ -446,6 +446,19 @@ pub fn drop_smoke(g: Game) {
     g.fuel = g.fuel - SMOKE_COST;
 }
 
+// A live chaser this close means the siren: the music layer polls it.
+pub fn danger(g: Game) -> bool {
+    if (g.over) {
+        return false;
+    }
+    for e in g.enemies {
+        if (e.stun == 0 && iabs(e.x - g.player.x) + iabs(e.y - g.player.y) <= 6) {
+            return true;
+        }
+    }
+    false
+}
+
 // ms between player ticks: an empty tank halves the speed (the Rally-X
 // limp-home, not an instant death).
 pub fn player_ms(g: Game) -> int {
