@@ -128,6 +128,13 @@ La disciplina de raygame (Tetris), con un reloj más y una cámara:
    diagnóstico del checker lo explica y sugiere `return`/`let`. Buen error.
 3. Lo demás salió a la primera sobre la superficie M115–M127 (v1 del juego:
    tests 8/8 y pty al primer intento).
+3b. **`term.capabilities()` no es reentrante dentro de `term.raw`**
+   (`raylang/IDEAS.md` §80): llamada dentro de nuestra sesión raw, su
+   restauración interna deja el terminal cocinado → todas las teclas
+   muertas. Workaround aplicado: detectarla ANTES de `term.raw` y pasar el
+   struct. Moraleja de arnés: `script -q` de macOS ni responde DA1 ni
+   termina antes del EOF de stdin — para bugs de input hace falta un pty
+   que conteste como un terminal real (hay arnés Python en el hallazgo).
 4. **`std/inflate` sostiene un decoder PNG completo** sin fricción: con
    `zlib_inflate` + `bytes` indexables + `bytes_of` + bits/hex, el codec
    entero (decode con los 5 filtros + encode stored con CRC-32/Adler-32

@@ -24,14 +24,11 @@ fn show_img(path: string) -> int {
     // Capability ladder, only when talking to a real terminal (the DA1
     // query needs raw mode): kitty gets the PNG itself, everyone else the
     // half-block rendering.
+    // capabilities() runs its own raw stint for the DA1 query — never call
+    // it inside another raw session.
     var kitty = false;
     if (term.is_tty(0) && term.is_tty(1)) {
-        match (term.raw(fn() -> bool { term.capabilities().kitty_graphics })) {
-            Result.Ok(k) => {
-                kitty = k;
-            },
-            Result.Err(e) => { },
-        }
+        kitty = term.capabilities().kitty_graphics;
     }
     if (kitty) {
         print(sprite.kitty_png(data));

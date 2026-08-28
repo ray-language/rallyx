@@ -177,6 +177,11 @@ fn drain_keys(a: App) {
                 more = false;
                 if (a.pending == b"\x1b") {
                     a.pending = b"";
+                } else if (a.pending.len() > 8) {
+                    // A stray terminal reply (DA1 and friends) must never
+                    // wedge the key stream: drop a byte and resync.
+                    a.pending = a.pending.sub_bytes(1, a.pending.len());
+                    more = true;
                 }
             },
         }
@@ -188,7 +193,7 @@ fn drain_keys(a: App) {
 // caption under the pixels), truecolor half-blocks everywhere else.
 // Skipped silently when the asset is not around (running far from the
 // project root).
-fn splash() {
+fn splash(caps: term.Capabilities) {
     let data = match (fs.read_file_bytes("assets/car.png")) {
         Result.Ok(d) => d,
         Result.Err(e) => {
@@ -203,7 +208,6 @@ fn splash() {
     };
     let e = screen.esc();
     var out = e + "[2J" + e + "[H";
-    let caps = term.capabilities();
     var rows = 0;
     if (caps.kitty_graphics) {
         out = out + e + "[3;10H" + sprite.kitty_png(data);
@@ -226,12 +230,12 @@ fn splash() {
     write_now(e + "[2J");
 }
 
-fn event_loop(with_music: bool) -> int {
+fn event_loop(with_music: bool, caps: term.Capabilities) -> int {
     var empty: [string] = [];
     let a = App { g: rally.new_game(), prev: empty, pending: b"", hiscore: load_hiscore(), paused: false, quit: false, music: if (with_music) { music.start() } else { music.off() }, danger: false, engine: wsg.ENGINE_RUN, prev_score: 0, prev_lives: 3, prev_over: false };
     let e = screen.esc();
     write_now(e + "[?1049h" + e + "[?25l" + e + "[2J" + e + "[H");
-    splash();
+    splash(caps);
     repaint(a);
     var next_frame = time.monotonic() + FRAME_MS;
     var next_player = time.monotonic() + rally.player_ms(a.g);
@@ -286,7 +290,12 @@ pub fn play(with_music: bool) -> int {
         eprint("rallyx: needs a terminal");
         return 1;
     }
-    match (term.raw(fn() -> int { event_loop(with_music) })) {
+    // Capability detection BEFORE our raw session: capabilities() runs its
+    // own raw stint for the DA1 query and restores the terminal to cooked
+    // on the way out — called inside our session it would leave the game
+    // line-buffered (dead keys).
+    let caps = term.capabilities();
+    match (term.raw(fn() -> int { event_loop(with_music, caps) })) {
         Result.Ok(code) => code,
         Result.Err(e) => {
             eprint("rallyx: " + e);
