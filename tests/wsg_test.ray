@@ -183,3 +183,56 @@ fn danger_predicate_sees_only_live_nearby_chasers() {
     g.enemies[0].x = 11;
     assert(!rally.danger(g));
 }
+
+@test
+fn pause_silences_the_mix_freezes_the_song_and_resumes() {
+    let t = wsg.new_tracker();
+    // Advance one full step so the tracker holds non-trivial state.
+    let a0 = wsg.tick(t);
+    let a1 = wsg.tick(t);
+    let step_before = t.step;
+
+    wsg.apply(t, wsg.EV_PAUSE);
+    // Two paused ticks (one full step's worth): pure silence.
+    let p0 = wsg.tick(t);
+    let p1 = wsg.tick(t);
+    var loud = false;
+    var i = 0;
+    while (i < p0.len()) {
+        if (p0[i] != 0) {
+            loud = true;
+        }
+        i = i + 1;
+    }
+    var j = 0;
+    while (j < p1.len()) {
+        if (p1[j] != 0) {
+            loud = true;
+        }
+        j = j + 1;
+    }
+    assert(!loud);
+    // The song is frozen: the step counter did not advance under pause.
+    assert_eq(t.step, step_before);
+
+    // Resume: the engine drone (at least) comes back.
+    wsg.apply(t, wsg.EV_RESUME);
+    let r0 = wsg.tick(t);
+    let r1 = wsg.tick(t);
+    var back = false;
+    var k = 0;
+    while (k < r0.len()) {
+        if (r0[k] != 0) {
+            back = true;
+        }
+        k = k + 1;
+    }
+    var m = 0;
+    while (m < r1.len()) {
+        if (r1[m] != 0) {
+            back = true;
+        }
+        m = m + 1;
+    }
+    assert(back);
+}

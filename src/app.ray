@@ -118,6 +118,7 @@ fn on_key(a: App, k: Key) {
                 a.quit = true;
             } else if (c == 'p') {
                 a.paused = !a.paused;
+                music.send_event(a.music, if (a.paused) { wsg.EV_PAUSE } else { wsg.EV_RESUME });
             } else if (c == ' ') {
                 if (!a.paused) {
                     if (rally.drop_smoke(a.g)) {

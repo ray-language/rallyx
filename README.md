@@ -3,7 +3,7 @@
 Rally-X de terminal a 30 fps, escrito en [raylang](https://github.com/ray-language/raylang): el coche que no se detiene, las 10 banderas que valen más cuanto más llevas, los coches rojos que te persiguen, las rocas, el combustible que se agota — y la cortina de humo que atonta al que la pisa. Como en el arcade, la ciudad es **más grande que la pantalla**: la cámara sigue al coche y el **radar** del panel muestra dónde quedan las banderas.
 
 ```text
-$ rallyx             # ↑↓←→ conducir · espacio humo · p pausa · r reiniciar · q salir
+$ rallyx             # ↑↓←→ conducir · espacio humo · p pausa (calla la música) · r reiniciar · q salir
 $ rallyx --seed      # ciudad determinista (banderas/rocas con semilla fija)
 $ rallyx --img f.png # dibuja cualquier PNG en el terminal (half-blocks truecolor) y sale
 $ rallyx --no-music  # sin música (sin dispositivo de audio, calla solo)
@@ -124,7 +124,7 @@ La disciplina de raygame (Tetris), con un reloj más y una cámara:
 | v2: túneles laterales con wrap (coche, humo y BFS los cruzan) | ✅ |
 | v2: baches que arrastran el coche; persecución BFS con radio + fallback | ✅ |
 | v2: motor ligado al coche real (rueda / ralentí / petardeo sin gasolina) | ✅ |
-| Tests (reglas + volante + cámara + frame + PNG diferencial + sprites + sinte) | ✅ 31 |
+| Tests (reglas + volante + cámara + frame + PNG diferencial + sprites + sinte) | ✅ 32 |
 | Sprites en celda de juego (necesita ≥8×8 px/celda: no cabe en un term 80×24) | 📋 v3 |
 
 ## Hallazgos de dogfood
