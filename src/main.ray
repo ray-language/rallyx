@@ -31,7 +31,14 @@ fn show_img(path: string) -> int {
         kitty = term.capabilities().kitty_graphics;
     }
     if (kitty) {
-        print(sprite.kitty_png(data));
+        // Pin a small display box (kitty c=/r=) so the art stays compact
+        // instead of the terminal blowing it up. w/3 × h/6 keeps the aspect
+        // right (cells are ~twice as tall as wide). Image bytes untouched.
+        var rows = img.height / 6;
+        if (rows < 1) {
+            rows = 1;
+        }
+        print(sprite.kitty_png_box(data, img.width / 3, rows));
     } else {
         for line in sprite.render(img) {
             print(line);

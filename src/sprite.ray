@@ -65,6 +65,14 @@ pub fn kitty_png(data: bytes) -> string {
     chunked(data, "a=T,f=100")
 }
 
+// Same delivery, but pin the on-screen size to a cols×rows cell box (kitty
+// c=/r=). Without this the terminal picks the size and tends to blow small
+// pixel art up huge; a small box keeps it compact so the pixels don't read
+// as chunky. The image bytes are untouched — this is display size only.
+pub fn kitty_png_box(data: bytes, cols: int, rows: int) -> string {
+    chunked(data, "a=T,f=100,c=" + to_string(cols) + ",r=" + to_string(rows))
+}
+
 fn chunked(data: bytes, head: string) -> string {
     let b64 = base64.base64(data);
     var out = "";

@@ -208,17 +208,17 @@ fn splash(caps: term.Capabilities) {
     };
     let e = screen.esc();
     var out = e + "[2J" + e + "[H";
-    // kitty draws the PNG at its NATIVE pixel size (no c=/r= upscaling): small
-    // and 1:1 crisp instead of stretched-and-blocky. cell_px tells us how many
-    // cell rows that occupies so the caption clears it. Half-blocks are the
-    // universal fallback at height/2 rows. Col 3 keeps it inside 80 columns.
+    // kitty pins a small display box (c=/r=) so the scene stays compact rather
+    // than the terminal blowing the pixel art up huge; w/3 × h/6 keeps the
+    // aspect (cells are ~twice as tall as wide). Half-blocks are the universal
+    // fallback at height/2 rows. Col 3 keeps it inside an 80-column terminal.
+    var krows = img.height / 6;
+    if (krows < 1) {
+        krows = 1;
+    }
     var caprow = 3 + (img.height + 1) / 2;
     if (caps.kitty_graphics) {
-        out = out + e + "[2;3H" + sprite.kitty_png(data);
-        let krows = match (term.cell_px()) {
-            Option.Some(cell) => img.height / cell.1 + 1,
-            Option.None => img.height / 16 + 1,
-        };
+        out = out + e + "[2;3H" + sprite.kitty_png_box(data, img.width / 3, krows);
         caprow = 3 + krows;
     } else {
         let lines = sprite.render(img);
