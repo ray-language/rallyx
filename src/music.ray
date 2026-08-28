@@ -2,14 +2,19 @@
 // streams them into a live ffplay via stdin_pipe. Proc.write's backpressure
 // (the fiber parks when the pipe is full) is the safety net; the actual
 // pacing is an absolute clock that keeps only LEAD_MS of audio ahead of
-// real time — that is what makes the siren react NOW and not a pipe-buffer
-// later. Game events arrive through a channel; EOF (close_stdin) or a dead
-// ffplay end the fiber cleanly.
+// real time. The latency anatomy that number controls: ffplay slurps the
+// pipe into its own queues as fast as we write, so OUR written-ahead amount
+// IS the event-to-ear delay (plus ~40 ms of SDL buffer) — backpressure
+// never engages and cannot pace anything. The ahead amount oscillates in
+// [LEAD_MS, LEAD_MS + STEP_MS]; the clock is anchored AFTER the first write
+// so ffplay's spawn/startup time does not become a permanent offset. Game
+// events arrive through a channel; EOF (close_stdin) or a dead ffplay end
+// the fiber cleanly.
 import std/process;
 import std/time;
 import wsg;
 
-const LEAD_MS: int = 250;
+const LEAD_MS: int = 90;
 
 pub struct Music {
     ch: Channel<int>,
@@ -33,6 +38,10 @@ pub fn start() -> Music {
         "32",
         "-analyzeduration",
         "0",
+        "-fflags",
+        "nobuffer",
+        "-flags",
+        "low_delay",
         "-f",
         "s16le",
         "-ar",
@@ -72,7 +81,7 @@ pub fn stop(m: Music) {
 
 fn pump(p: process.Proc, ch: Channel<int>) {
     let t = wsg.new_tracker();
-    let t0 = time.monotonic();
+    var t0 = time.monotonic();
     var steps = 0;
     var running = true;
     while (running) {
@@ -102,7 +111,14 @@ fn pump(p: process.Proc, ch: Channel<int>) {
                 time.sleep(ahead - LEAD_MS);
             }
             match (p.write(wsg.tick(t))) {
-                Result.Ok(n) => { },
+                Result.Ok(n) => {
+                    if (steps == 0) {
+                        // Anchor the clock once ffplay is demonstrably up and
+                        // reading — its spawn time must not become a
+                        // permanent audio delay.
+                        t0 = time.monotonic();
+                    }
+                },
                 Result.Err(dead) => {
                     // ffplay died or closed its end: fall silent, don't crash
                     // the game.

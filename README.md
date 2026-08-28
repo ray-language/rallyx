@@ -26,10 +26,13 @@ solo calla cuando el coche no está (choque, game over). La melodía es un **hom
 al galope del arcade (la partitura original es de Namco y no se transcribe):
 fanfarria mayor con galope de semicorcheas en el bajo y el giro descendente
 de cierre.
-La clave del patrón: la contrapresión de `Proc.write` es la red de seguridad,
-pero el *pacing* lo lleva un reloj absoluto que mantiene solo ~250 ms de
-audio por delante — con contrapresión sola, la sirena llegaría con el pipe
-entero (~1.5 s) de retraso.
+La clave del patrón: la contrapresión de `Proc.write` es solo red de
+seguridad — ffplay traga el pipe hacia sus colas internas tan rápido como
+escribas, así que **tu propio adelanto ES la latencia evento→oído**. El
+pacing lo lleva un reloj absoluto con ~90 ms de adelanto, anclado *después*
+del primer write (el arranque de ffplay no se vuelve desfase permanente);
+con eso el retraso queda en ~130–240 ms en vez del segundo largo que salía
+con 250 ms de lead + ancla temprana.
 
 Con `std/inflate` en el lenguaje, rallyx trae ahora un **codec PNG puro en
 raylang** (`src/png.ray`: IDAT vía `zlib_inflate`, filtros 0–4, RGB/RGBA/
@@ -136,10 +139,15 @@ La disciplina de raygame (Tetris), con un reloj más y una cámara:
    La asimetría macOS/Linux es el argumento real para un `std/audio`.
 6. **El patrón `stdin_pipe` validado E2E** (VM y nativo, bajo pty, sin
    zombies de ffplay al salir): `write` con contrapresión funciona tal cual
-   promete el REFERENCE, y la lección de dogfood es que para audio *reactivo*
-   la contrapresión no basta como reloj — un pipe de 64 KB son ~1.5 s de
-   audio a 22050 Hz mono, así que los eventos sonarían un pipe tarde. Reloj
-   absoluto + adelanto acotado (~250 ms) es el patrón. Dos detalles de
+   promete el REFERENCE, y la lección de dogfood es la **anatomía de la
+   latencia**: la contrapresión nunca llega a actuar (ffplay drena el pipe
+   a sus colas internas al instante), así que el retraso evento→oído es
+   exactamente el audio que TÚ llevas escrito por delante, más ~40 ms de
+   SDL. Tres reglas: adelanto pequeño (~90 ms — oscila en [LEAD,
+   LEAD+STEP]), anclar el reloj tras el PRIMER write (el spawn de ffplay no
+   debe volverse desfase permanente), y `-fflags nobuffer -flags low_delay`
+   por si acaso. Con 250 ms de lead + ancla temprana el juego sonaba ~1 s
+   tarde; así queda en ~130–240 ms. Dos detalles de
    lenguaje: `Channel.bounded` necesita anotación de tipo en el `let` (el
    build nativo lo exige; los tests VM nunca compilaron ese módulo), y la
    doc de `spawn` aún dice "Requires the VM engine" — otro caso de la nota
