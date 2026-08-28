@@ -1,5 +1,5 @@
-// The rules, clock-free and seeded: maze shape, driving, flags and scoring,
-// smoke, chasers, crashes, fuel, and the frame contract.
+// The rules, clock-free and seeded: maze shape, queued steering, flags and
+// scoring, smoke, chasers, crashes, fuel, and the frame/camera contract.
 import std/random;
 import rally;
 import screen;
@@ -53,21 +53,49 @@ fn maze_is_well_formed_and_round_is_populated() {
 }
 
 @test
-fn car_advances_on_its_heading_and_walls_stop_it() {
+fn walls_stop_the_car_and_an_open_turn_is_taken_at_once() {
     let g = bare();
     g.player.x = 1;
     g.player.y = 1;
-    rally.turn(g, rally.LEFT);
+    g.player.dir = rally.LEFT;
+    g.want = rally.LEFT;
     let fuel_before = g.fuel;
     rally.step_player(g);
     // Wall at x=0: the car idles but still burns fuel.
     assert_eq(g.player.x, 1);
     assert_eq(g.player.y, 1);
     assert_eq(g.fuel, fuel_before - 1);
+    // An open turn applies on the very next tick — no dead keys.
     rally.turn(g, rally.RIGHT);
     rally.step_player(g);
+    assert_eq(g.player.dir, rally.RIGHT);
     assert_eq(g.player.x, 2);
     assert_eq(g.player.y, 1);
+}
+
+// The reported bug: up pressed mid-corridor used to slam into the block wall
+// and get lost. Now the heading is queued and the car turns at the first
+// opening — exactly at the junction.
+@test
+fn queued_turn_waits_for_the_first_opening() {
+    let g = bare();
+    g.player.x = 2;
+    g.player.y = 4;
+    g.player.dir = rally.RIGHT;
+    g.want = rally.RIGHT;
+    rally.turn(g, rally.UP);
+    rally.step_player(g);
+    rally.step_player(g);
+    rally.step_player(g);
+    // Three ticks along the corridor: still heading right, wall above.
+    assert_eq(g.player.x, 5);
+    assert_eq(g.player.y, 4);
+    assert_eq(g.player.dir, rally.RIGHT);
+    // The junction at x=5 opens upward: the queued turn fires.
+    rally.step_player(g);
+    assert_eq(g.player.x, 5);
+    assert_eq(g.player.y, 3);
+    assert_eq(g.player.dir, rally.UP);
 }
 
 @test
@@ -99,7 +127,7 @@ fn smoke_costs_fuel_and_stuns_the_chaser_that_drives_in() {
     let g = bare();
     g.player.x = 3;
     g.player.y = 1;
-    rally.turn(g, rally.RIGHT);
+    g.player.dir = rally.RIGHT;
     let fuel_before = g.fuel;
     rally.drop_smoke(g);
     // The cloud lands behind the car.
@@ -144,6 +172,7 @@ fn rocks_crash_the_car_and_three_crashes_end_the_game() {
     while (crashes < 3) {
         g.player.x = 1;
         g.player.y = 1;
+        g.player.dir = rally.RIGHT;
         rally.turn(g, rally.RIGHT);
         rally.step_player(g);
         crashes = crashes + 1;
@@ -155,33 +184,54 @@ fn rocks_crash_the_car_and_three_crashes_end_the_game() {
     rally.step_player(g);
     assert_eq(g.fuel, fuel_before);
     rally.turn(g, rally.UP);
-    assert_eq(g.player.dir, rally.RIGHT);
+    assert_eq(g.want, rally.RIGHT);
 }
 
 @test
 fn empty_tank_slows_the_car_and_blocks_smoke() {
     let g = bare();
-    assert_eq(rally.player_ms(g), 90);
+    assert_eq(rally.player_ms(g), 150);
     g.fuel = 0;
-    assert_eq(rally.player_ms(g), 180);
+    assert_eq(rally.player_ms(g), 300);
     g.fuel = rally.SMOKE_COST - 1;
     g.player.x = 3;
     g.player.y = 1;
-    rally.turn(g, rally.RIGHT);
+    g.player.dir = rally.RIGHT;
     rally.drop_smoke(g);
     assert_eq(g.smoke[1 * rally.W + 2], 0);
     assert_eq(g.fuel, rally.SMOKE_COST - 1);
 }
 
 @test
-fn frame_is_stable_shape_and_diff_is_minimal() {
+fn camera_follows_the_car_and_clamps_at_the_edges() {
+    let g = bare();
+    g.player.x = 2;
+    g.player.y = 2;
+    let c1 = screen.camera(g);
+    assert_eq(c1.0, 0);
+    assert_eq(c1.1, 0);
+    g.player.x = rally.W / 2;
+    g.player.y = rally.H / 2;
+    let c2 = screen.camera(g);
+    assert_eq(c2.0, rally.W / 2 - screen.VIEW_W / 2);
+    assert_eq(c2.1, rally.H / 2 - screen.VIEW_H / 2);
+    g.player.x = rally.W - 2;
+    g.player.y = rally.H - 2;
+    let c3 = screen.camera(g);
+    assert_eq(c3.0, rally.W - screen.VIEW_W);
+    assert_eq(c3.1, rally.H - screen.VIEW_H);
+}
+
+@test
+fn frame_is_stable_shape_and_diff_is_minimal_when_clamped() {
     let g = bare();
     g.flags = [(1, 1)];
     g.player.x = 2;
-    g.player.y = 13;
+    g.player.y = rally.H - 2;
+    g.player.dir = rally.RIGHT;
     rally.turn(g, rally.RIGHT);
     let f1 = screen.frame(g, 0);
-    assert_eq(f1.len(), rally.H + 1);
+    assert_eq(f1.len(), screen.VIEW_H + 1);
     rally.step_player(g);
     let f2 = screen.frame(g, 0);
     var changed = 0;
@@ -192,8 +242,9 @@ fn frame_is_stable_shape_and_diff_is_minimal() {
         }
         i = i + 1;
     }
-    // A one-cell move repaints its row, plus at most the fuel/score panel rows.
+    // Camera clamped: a one-cell move repaints its row plus at most the
+    // fuel bar and the radar row.
     assert(changed >= 1);
-    assert(changed <= 3);
+    assert(changed <= 4);
     assert_eq(screen.paint_diff(f2, f2), "");
 }

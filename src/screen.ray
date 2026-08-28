@@ -1,6 +1,12 @@
-// rallyx — frame builder + line-diff painter (raygame's discipline): a frame
-// is fixed lines, a repaint is absolute-move + overwrite of changed lines.
+// rallyx — frame builder + line-diff painter. The world is bigger than the
+// screen: a camera follows the car (clamped at the edges) and a radar in
+// the panel shows the whole city — flags, chasers and you — like the
+// arcade's. Cars render as heading arrows; smoke fades as it thins.
 import rally;
+
+pub const VIEW_W: int = 26;
+
+pub const VIEW_H: int = 18;
 
 pub fn esc() -> string {
     "\u{1B}"
@@ -10,29 +16,67 @@ fn paint(code: int, s: string) -> string {
     esc() + "[" + to_string(code) + "m" + s + esc() + "[0m"
 }
 
+pub fn camera(g: rally.Game) -> (int, int) {
+    var cx = g.player.x - VIEW_W / 2;
+    if (cx < 0) {
+        cx = 0;
+    }
+    if (cx > rally.W - VIEW_W) {
+        cx = rally.W - VIEW_W;
+    }
+    var cy = g.player.y - VIEW_H / 2;
+    if (cy < 0) {
+        cy = 0;
+    }
+    if (cy > rally.H - VIEW_H) {
+        cy = rally.H - VIEW_H;
+    }
+    return (cx, cy);
+}
+
+fn arrow(d: int) -> string {
+    if (d == rally.UP) {
+        "▲▲"
+    } else if (d == rally.DOWN) {
+        "▼▼"
+    } else if (d == rally.LEFT) {
+        "◀◀"
+    } else {
+        "▶▶"
+    }
+}
+
+fn smoke_str(ticks: int) -> string {
+    let s = if (ticks > rally.SMOKE_TICKS * 2 / 3) { "▓▓" } else {
+        if (ticks > rally.SMOKE_TICKS / 3) { "▒▒" } else { "░░" }
+    };
+    paint(90, s)
+}
+
 fn cell_str(g: rally.Game, x: int, y: int) -> string {
     if (g.player.x == x && g.player.y == y && !g.over) {
-        return paint(96, "▓▓");
+        return paint(93, arrow(g.player.dir));
     }
     for e in g.enemies {
         if (e.x == x && e.y == y) {
-            // Stunned chasers dim to magenta so the smoke hit reads.
-            return if (e.stun > 0) { paint(35, "▒▒") } else { paint(91, "▓▓") };
+            // Stunned chasers show crossed-out in magenta so the smoke hit
+            // reads at a glance.
+            return if (e.stun > 0) { paint(35, "××") } else { paint(91, arrow(e.dir)) };
         }
     }
     if (g.smoke[y * rally.W + x] > 0) {
-        return paint(90, "░░");
+        return smoke_str(g.smoke[y * rally.W + x]);
     }
     for (fx, fy) in g.flags.iter() {
         if (fx == x && fy == y) {
             if (x == g.special_x && y == g.special_y) {
-                return paint(95, "S ");
+                return paint(95, "▙S");
             }
-            return paint(93, "F ");
+            return paint(93, "▙F");
         }
     }
     if (rally.rock_at(g, x, y)) {
-        return paint(37, "██");
+        return paint(37, "◢◣");
     }
     if (g.walls[y * rally.W + x]) {
         return paint(34, "██");
@@ -62,40 +106,74 @@ fn lives_str(g: rally.Game) -> string {
     paint(91, s)
 }
 
+// The radar: the whole 48×32 city scaled to 16×8 — you (cyan), the chasers
+// (red), the flags (yellow, the special in magenta).
+fn radar_cell(g: rally.Game, rx: int, ry: int) -> string {
+    if (!g.over && g.player.x / 3 == rx && g.player.y / 4 == ry) {
+        return paint(96, "◆");
+    }
+    for e in g.enemies {
+        if (e.x / 3 == rx && e.y / 4 == ry) {
+            return paint(91, "●");
+        }
+    }
+    for (fx, fy) in g.flags.iter() {
+        if (fx / 3 == rx && fy / 4 == ry) {
+            if (fx == g.special_x && fy == g.special_y) {
+                return paint(95, "●");
+            }
+            return paint(93, "·");
+        }
+    }
+    " "
+}
+
+fn radar_row(g: rally.Game, ry: int) -> string {
+    var row = paint(90, "▏");
+    var rx = 0;
+    while (rx < 16) {
+        row = row + radar_cell(g, rx, ry);
+        rx = rx + 1;
+    }
+    row + paint(90, "▕")
+}
+
 pub fn frame(g: rally.Game, hiscore: int) -> [string] {
+    let cam = camera(g);
     var out: [string] = [];
     out.push("  rallyx");
-    var y = 0;
-    while (y < rally.H) {
+    var vy = 0;
+    while (vy < VIEW_H) {
+        let wy = cam.1 + vy;
         var row = "  ";
-        var x = 0;
-        while (x < rally.W) {
-            row = row + cell_str(g, x, y);
-            x = x + 1;
+        var vx = 0;
+        while (vx < VIEW_W) {
+            row = row + cell_str(g, cam.0 + vx, wy);
+            vx = vx + 1;
         }
-        if (y == 1) {
+        if (vy == 0) {
             row = row + "   score  " + to_string(g.score);
-        } else if (y == 2) {
+        } else if (vy == 1) {
             row = row + "   hi     " + to_string(hiscore);
-        } else if (y == 3) {
+        } else if (vy == 2) {
             row = row + "   fuel   " + fuel_bar(g);
-        } else if (y == 4) {
+        } else if (vy == 3) {
             row = row + "   lives  " + lives_str(g);
-        } else if (y == 5) {
-            row = row + "   round  " + to_string(g.round);
-        } else if (y == 7) {
-            row = row + "   flags  " + to_string(g.flags.len()) + " left";
-        } else if (y == 10) {
-            row = row + "   ↑↓←→ conducir";
-        } else if (y == 11) {
-            row = row + "   espacio humo";
-        } else if (y == 12) {
-            row = row + "   p pausa · q salir";
-        } else if (y == 14 && g.over) {
+        } else if (vy == 4) {
+            row = row + "   round  " + to_string(g.round) + " · flags " + to_string(g.flags.len());
+        } else if (vy == 5 && g.over) {
             row = row + "   " + esc() + "[7m GAME OVER — r reinicia " + esc() + "[0m";
+        } else if (vy == 6) {
+            row = row + "   radar";
+        } else if (vy >= 7 && vy <= 14) {
+            row = row + "   " + radar_row(g, vy - 7);
+        } else if (vy == 16) {
+            row = row + "   ↑↓←→ conducir · espacio humo";
+        } else if (vy == 17) {
+            row = row + "   p pausa · q salir";
         }
         out.push(row);
-        y = y + 1;
+        vy = vy + 1;
     }
     out
 }

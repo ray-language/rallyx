@@ -1,12 +1,15 @@
-// rallyx — Rally-X rules, pure and clock-free: a maze of streets, a car that
-// never stops, flags worth more each pickup, red chasers, rocks, fuel, and a
-// smoke screen. The app layer owns the clocks; everything here is
-// deterministic given the RNG seed.
+// rallyx — Rally-X rules, pure and clock-free: a big scrolling maze of
+// streets, a car that never stops, flags worth more each pickup, red
+// chasers, rocks, fuel, and a smoke screen. Steering is QUEUED: an arrow
+// sets the wanted heading and the car takes it at the first open cell, so
+// pressing up just before a junction turns exactly at the junction. The app
+// layer owns the clocks; everything here is deterministic given the RNG
+// seed.
 import std/random;
 
-pub const W: int = 24;
+pub const W: int = 48;
 
-pub const H: int = 16;
+pub const H: int = 32;
 
 pub const UP: int = 0;
 
@@ -16,43 +19,21 @@ pub const DOWN: int = 2;
 
 pub const LEFT: int = 3;
 
-pub const FUEL_MAX: int = 400;
+pub const FUEL_MAX: int = 600;
 
-pub const SMOKE_COST: int = 25;
+pub const SMOKE_COST: int = 30;
 
-pub const SMOKE_TICKS: int = 30;
+pub const SMOKE_TICKS: int = 40;
 
-pub const STUN_TICKS: int = 8;
+pub const STUN_TICKS: int = 10;
 
 pub const FLAG_COUNT: int = 10;
 
-pub const ROCK_COUNT: int = 4;
+pub const ROCK_COUNT: int = 8;
 
-pub const PLAYER_X: int = 12;
+pub const PLAYER_X: int = 24;
 
-pub const PLAYER_Y: int = 14;
-
-// '#' is wall, '.' is street. 24×16, closed border, Rally-X style blocks.
-fn maze_rows() -> [string] {
-    [
-        "########################",
-        "#......................#",
-        "#.##.##.####.####.##.#.#",
-        "#.##.##.####.####.##.#.#",
-        "#......................#",
-        "#.##.####.##.##.####.#.#",
-        "#.##.####.##.##.####.#.#",
-        "#........##..##........#",
-        "#.######.##..##.#####..#",
-        "#.######........#####..#",
-        "#......................#",
-        "#.##.####.####.####.##.#",
-        "#.##.####.####.####.##.#",
-        "#......................#",
-        "#......................#",
-        "########################"
-    ]
-}
+pub const PLAYER_Y: int = 30;
 
 pub struct Car {
     x: int,
@@ -69,6 +50,7 @@ pub struct Game {
     special_x: int,
     special_y: int,
     player: Car,
+    want: int,
     enemies: [Car],
     fuel: int,
     score: int,
@@ -77,6 +59,31 @@ pub struct Game {
     flags_taken: int,
     special_taken: bool,
     over: bool,
+}
+
+// The city: a closed border, streets on a grid (blocks 3 wide × 2 tall,
+// Rally-X proportions), and three carved plazas for open driving.
+fn is_street(x: int, y: int) -> bool {
+    if (x <= 0 || x >= W - 1 || y <= 0 || y >= H - 1) {
+        return false;
+    }
+    if (y % 3 == 1 || y == H - 2) {
+        return true;
+    }
+    if (x % 4 == 1 || x == W - 2) {
+        return true;
+    }
+    // Plazas: center, top-left, bottom-right.
+    if (x >= 20 && x <= 27 && y >= 14 && y <= 17) {
+        return true;
+    }
+    if (x >= 6 && x <= 11 && y >= 6 && y <= 7) {
+        return true;
+    }
+    if (x >= 34 && x <= 41 && y >= 24 && y <= 25) {
+        return true;
+    }
+    false
 }
 
 fn dir_dx(d: int) -> int {
@@ -118,12 +125,13 @@ fn enemy_at(g: Game, x: int, y: int) -> bool {
 
 fn enemy_spawn(i: int) -> Car {
     let xs = [1, W - 2, W - 2, 1];
-    let ys = [1, 1, H - 3, H - 3];
+    let ys = [1, 1, H - 2, H - 2];
     Car { x: xs[i % 4], y: ys[i % 4], dir: DOWN, stun: STUN_TICKS }
 }
 
 fn reset_positions(g: Game) {
     g.player = Car { x: PLAYER_X, y: PLAYER_Y, dir: RIGHT, stun: 0 };
+    g.want = RIGHT;
     var es: [Car] = [];
     var i = 0;
     while (i < g.enemies.len()) {
@@ -172,7 +180,7 @@ fn placement_cells(g: Game) -> [(int, int)] {
         var x = 0;
         while (x < W) {
             var ok = !g.walls[y * W + x];
-            if (iabs(x - PLAYER_X) + iabs(y - PLAYER_Y) <= 3) {
+            if (iabs(x - PLAYER_X) + iabs(y - PLAYER_Y) <= 4) {
                 ok = false;
             }
             var i = 0;
@@ -210,6 +218,7 @@ fn setup_round(g: Game) {
     }
     g.enemies = es;
     g.player = Car { x: PLAYER_X, y: PLAYER_Y, dir: RIGHT, stun: 0 };
+    g.want = RIGHT;
     var free = placement_cells(g);
     var flags: [(int, int)] = [];
     i = 0;
@@ -236,10 +245,14 @@ fn setup_round(g: Game) {
 
 pub fn new_game() -> Game {
     var walls: [bool] = [];
-    for r in maze_rows() {
-        for c in r.chars() {
-            walls.push(c == '#');
+    var y = 0;
+    while (y < H) {
+        var x = 0;
+        while (x < W) {
+            walls.push(!is_street(x, y));
+            x = x + 1;
         }
+        y = y + 1;
     }
     var smoke: [int] = [];
     var i = 0;
@@ -258,6 +271,7 @@ pub fn new_game() -> Game {
         special_x: 0,
         special_y: 0,
         player: Car { x: PLAYER_X, y: PLAYER_Y, dir: RIGHT, stun: 0 },
+        want: RIGHT,
         enemies: no_enemies,
         fuel: FUEL_MAX,
         score: 0,
@@ -271,9 +285,11 @@ pub fn new_game() -> Game {
     g
 }
 
+// Queue the wanted heading; the car takes it at the first cell where that
+// side is open (so no input is ever lost against a wall).
 pub fn turn(g: Game, d: int) {
     if (!g.over) {
-        g.player.dir = d;
+        g.want = d;
     }
 }
 
@@ -320,8 +336,9 @@ fn pick_flag(g: Game) {
     }
 }
 
-// One player tick: the car always tries to advance in its heading. A wall
-// stops it (idling burns fuel too); a rock is a crash.
+// One player tick: take the queued turn if that side is open, then advance
+// on the heading. A wall stops the car (idling burns fuel too); a rock is a
+// crash.
 pub fn step_player(g: Game) {
     if (g.over) {
         return;
@@ -329,6 +346,13 @@ pub fn step_player(g: Game) {
     decay_smoke(g);
     if (g.fuel > 0) {
         g.fuel = g.fuel - 1;
+    }
+    if (g.want != g.player.dir) {
+        let wx = g.player.x + dir_dx(g.want);
+        let wy = g.player.y + dir_dy(g.want);
+        if (!wall_at(g, wx, wy)) {
+            g.player.dir = g.want;
+        }
     }
     let nx = g.player.x + dir_dx(g.player.dir);
     let ny = g.player.y + dir_dy(g.player.dir);
@@ -425,11 +449,11 @@ pub fn drop_smoke(g: Game) {
 // ms between player ticks: an empty tank halves the speed (the Rally-X
 // limp-home, not an instant death).
 pub fn player_ms(g: Game) -> int {
-    if (g.fuel > 0) { 90 } else { 180 }
+    if (g.fuel > 0) { 150 } else { 300 }
 }
 
 // ms between chaser ticks: each round they close in a little faster.
 pub fn enemy_ms(g: Game) -> int {
-    let ms = 115 - (g.round - 1) * 5;
-    if (ms < 85) { 85 } else { ms }
+    let ms = 170 - (g.round - 1) * 6;
+    if (ms < 120) { 120 } else { ms }
 }
