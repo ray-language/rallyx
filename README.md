@@ -6,15 +6,17 @@ Rally-X de terminal a 30 fps, escrito en [raylang](https://github.com/ray-langua
 $ rallyx             # ↑↓←→ conducir · espacio humo · p pausa · r reiniciar · q salir
 $ rallyx --seed      # ciudad determinista (banderas/rocas con semilla fija)
 $ rallyx --img f.png # dibuja cualquier PNG en el terminal (half-blocks truecolor) y sale
-$ rallyx --no-music  # sin música (sin ffplay instalado, calla solo)
-$ ray run tools/play_demo.ray  # tour audible de la partitura reactiva (~6 s)
+$ rallyx --no-music  # sin música (sin dispositivo de audio, calla solo)
+$ ray run tools/play_demo.ray  # tour audible de la partitura reactiva (~6 s; RAY_AUDIO_SINK=null para CI)
 ```
 
-**Música reactiva estilo Namco WSG**, sintetizada en vivo y servida a un
-`ffplay` persistente por `stdin_pipe` (M100 v3): 3 voces de wavetable de 32
-entradas × 4 bits (`src/wsg.ray`, puro y determinista — la partitura se
-testea byte a byte), mezcladas a s16le 22050 Hz por una fibra (`src/music.ray`)
-que empuja un paso de 110 ms por escritura. El juego le manda eventos por
+**Música reactiva estilo Namco WSG**, sintetizada en vivo y escrita
+**directo al dispositivo con `std/audio`** (M145 — la tercera generación:
+nació en afplay-batch mental, vivió en ffplay+stdin_pipe, y terminó en PCM
+nativo): 3 voces de wavetable de 32 entradas × 4 bits (`src/wsg.ray`, puro
+y determinista — la partitura se testea byte a byte), mezcladas a s16le
+22050 Hz por una fibra (`src/music.ray`) que empuja un paso de 110 ms por
+escritura. El juego le manda eventos por
 canal: **sirena** cuando un rojo vivo está a ≤6 celdas, **jingle** al coger
 bandera, **pshh de humo** (ruido LFSR de 15 bits que *roba la voz del
 arpegio* 3 pasos, como el WSG real robaba voces para los SFX), **barrido**
@@ -26,14 +28,16 @@ solo calla cuando el coche no está (choque, game over). La melodía es un **hom
 al galope del arcade (la partitura original es de Namco y no se transcribe):
 fanfarria mayor con galope de semicorcheas en el bajo y el giro descendente
 de cierre.
-La clave del patrón: el pacing se regula contra **el reloj de reproducción
-del propio ffplay**, extraído de su línea de stats en stderr (`Proc.err`).
-El reloj de pared no sirve: `tools/audio_probe.ray` demostró que ffplay (y
-ffmpeg→AudioToolbox) tragan PCM sin frenar hacia colas ilimitadas — la
-contrapresión nunca actúa — y como reproducen a 1×, un arranque lento o un
-underrun se convierte en **desfase permanente** (el segundo de retraso que
-tuvo este juego). Con el lazo cerrado, el adelanto escrito converge a
-~130–220 ms medidos y se autocorrige.
+La clave del pacing, medida con `tools/audio_buf.ray`: la cola del
+dispositivo absorbe **~1.7 s** antes de que `audio.write` aparque la fibra,
+así que la contrapresión pura marca el *tempo* pero retrasaría los eventos
+la cola entera — la fibra mantiene un **adelanto de reloj de pared de
+~100 ms**. Lo que `std/audio` arregla de raíz es el modo de fallo que tuvo
+la era ffplay: el dispositivo reproduce lo recién escrito **inmediatamente**
+tras cualquier hueco (no inserta silencio en una línea de tiempo), así que
+un arranque lento o un underrun se autocura en vez de volverse desfase
+permanente — el reloj de pared vuelve a ser correcto, sin scraping del
+reloj de ffplay.
 
 Imágenes con la superficie M143/M144: el decode es **`std/image`**
 (`decode_png` estricto — CRC por chunk, tipos 0/2/3/4/6, tRNS) y el dibujo
@@ -108,7 +112,7 @@ La disciplina de raygame (Tetris), con un reloj más y una cámara:
 | Binario nativo (jugado bajo pty) | ✅ |
 | PNG: decode vía `std/image` + encoder propio (stored+CRC) con tests diferenciales | ✅ |
 | Sprites: kitty graphics si el terminal puede (`capabilities`/`cell_px`), half-blocks si no | ✅ |
-| Música WSG reactiva en vivo (sirena/jingle/choque/game over) vía `stdin_pipe` | ✅ |
+| Música WSG reactiva en vivo (sirena/jingle/choque/game over) vía `std/audio` | ✅ |
 | SFX: pshh de humo (ruido LFSR, roba la voz del arpegio) + drone de motor | ✅ |
 | v2: túneles laterales con wrap (coche, humo y BFS los cruzan) | ✅ |
 | v2: baches que arrastran el coche; persecución BFS con radio + fallback | ✅ |
@@ -167,6 +171,17 @@ La disciplina de raygame (Tetris), con un reloj más y una cámara:
    build nativo lo exige; los tests VM nunca compilaron ese módulo), y la
    doc de `spawn` aún dice "Requires the VM engine" — otro caso de la nota
    estale "VM only" (funciona nativo, validado aquí).
+7. **`std/audio` adoptado el día que salió (M145)** — la música pasó de
+   ffplay+scraping a PCM directo, y el pump quedó a la mitad de líneas.
+   Medido (`tools/audio_buf.ray`): la cola del dispositivo absorbe **~1.7 s**
+   antes de que `write` aparque la fibra — la promesa "la contrapresión ES
+   el pacing" vale para el tempo, pero para audio *reactivo* la cola entera
+   sería la latencia: sigue haciendo falta el adelanto de reloj de pared
+   (~100 ms). La gran mejora es el modo de fallo: tras un hueco el
+   dispositivo reproduce lo nuevo al instante (autocura, sin el desfase
+   permanente de ffplay). Anotado en `raylang/IDEAS.md` §81: o un tope de
+   cola configurable en `open` (latency hint) o un `audio.played_ms(h)`
+   para cerrar el lazo sin reloj propio.
 
 ## Desarrollo
 

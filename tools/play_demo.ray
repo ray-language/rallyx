@@ -1,35 +1,15 @@
-// rallyx — audible tour of the reactive score, end to end through the real
-// pipe: tune → chase siren → flag jingle → crash sweep → game-over descent.
-// Run: ray run tools/play_demo.ray (needs ffplay; ~6 s of sound)
-import std/process;
+// rallyx — audible tour of the reactive score, straight to the device via
+// std/audio: tune → smoke puff → chase siren → flag jingle → crash sweep →
+// game-over descent. Run: ray run tools/play_demo.ray (~7 s of sound;
+// RAY_AUDIO_SINK=null for a silent CI run)
+import std/audio;
 import wsg;
 
 fn main() -> int {
-    let spawned = process
-        .cmd("ffplay", [
-        "-nodisp",
-        "-autoexit",
-        "-loglevel",
-        "quiet",
-        "-probesize",
-        "32",
-        "-analyzeduration",
-        "0",
-        "-f",
-        "s16le",
-        "-ar",
-        "22050",
-        "-ch_layout",
-        "mono",
-        "-i",
-        "-"
-    ])
-        .stdin_pipe()
-        .stream();
-    let p = match (spawned) {
-        Result.Ok(proc) => proc,
+    let h = match (audio.open(wsg.RATE, 1)) {
+        Result.Ok(handle) => handle,
         Result.Err(e) => {
-            eprint("play_demo: ffplay: " + e);
+            eprint("play_demo: audio: " + e);
             return 1;
         },
     };
@@ -51,7 +31,7 @@ fn main() -> int {
         }
         var i = 0;
         while (i < n) {
-            match (p.write(wsg.tick(t))) {
+            match (audio.write(h, wsg.tick(t))) {
                 Result.Ok(w) => { },
                 Result.Err(e) => {
                     eprint("play_demo: write: " + e);
@@ -62,17 +42,10 @@ fn main() -> int {
             i = i + 1;
         }
     }
-    p.close_stdin();
-    match (p.wait()) {
-        process.Exit.Code(code) => {
-            print(
-                "played " + to_string(steps) + " steps (" + to_string(steps * wsg.STEP_MS) + " ms), ffplay exit " + to_string(code)
-            );
-            code
-        },
-        process.Exit.Signal(sig) => {
-            eprint("play_demo: ffplay killed by signal " + to_string(sig));
-            1
-        },
-    }
+    audio.drain(h);
+    close(h);
+    print(
+        "played " + to_string(steps) + " steps (" + to_string(steps * wsg.STEP_MS) + " ms) via std/audio"
+    );
+    0
 }

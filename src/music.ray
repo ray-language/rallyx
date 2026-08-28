@@ -1,21 +1,20 @@
-// rallyx — the reactive music pump: a fiber synthesizes WSG steps and
-// streams them into a live ffplay via stdin_pipe, paced against ffplay's
-// OWN playback clock. Why: the probe (tools/audio_probe.ray) showed every
-// player child swallows unpaced PCM into unbounded queues — backpressure
-// never engages — and a child that starts its audio device late (or ever
-// underruns) falls behind wall time PERMANENTLY, because it plays at 1×
-// and never catches up. So wall-clock pacing cannot hold sync. The
-// feedback loop: ffplay prints its master clock in the stats line on
-// stderr ("   1.25 M-A: ..."), Proc.err hands us that stream, and the pump
-// writes only while written-ahead-of-playhead < LEAD_MS. Startup lag and
-// underruns self-correct on the next stats line. Game events arrive
-// through a channel; EOF (close_stdin) or a dead ffplay end the fiber
-// cleanly.
-import std/process;
+// rallyx — the reactive music pump on std/audio (M145): a fiber synthesizes
+// WSG steps and writes PCM straight to the device. Pacing note, measured
+// (tools/audio_buf.ray): the device queue absorbs ~1.7 s before audio.write
+// parks the fiber, so pure backpressure sets the TEMPO but would delay
+// events by the whole queue — the pump keeps a small wall-clock lead
+// (LEAD_MS) instead, exactly like the ffplay era. What std/audio fixes for
+// good is the failure mode: the device plays newly written audio
+// immediately after any gap (no silence inserted into a stream timeline),
+// so a slow start or an underrun heals itself instead of becoming
+// permanent lag — wall-clock pacing is now CORRECT, no playback-clock
+// scraping needed. Game events arrive through a channel; drain+close end
+// the fiber without clipping the tail.
+import std/audio;
 import std/time;
 import wsg;
 
-const LEAD_MS: int = 120;
+const LEAD_MS: int = 100;
 
 pub struct Music {
     ch: Channel<int>,
@@ -29,41 +28,15 @@ pub fn off() -> Music {
 
 pub fn start() -> Music {
     let ch: Channel<int> = Channel.bounded(32);
-    let spawned = process
-        .cmd("ffplay", [
-        "-nodisp",
-        "-autoexit",
-        "-hide_banner",
-        "-loglevel",
-        "info",
-        "-probesize",
-        "32",
-        "-analyzeduration",
-        "0",
-        "-fflags",
-        "nobuffer",
-        "-flags",
-        "low_delay",
-        "-f",
-        "s16le",
-        "-ar",
-        "22050",
-        "-ch_layout",
-        "mono",
-        "-i",
-        "-"
-    ])
-        .stdin_pipe()
-        .stream();
-    match (spawned) {
-        Result.Ok(p) => {
+    match (audio.open(wsg.RATE, 1)) {
+        Result.Ok(h) => {
             spawn(fn() {
-                pump(p, ch);
+                pump(h, ch);
             });
             Music { ch: ch, on: true }
         },
         Result.Err(e) => {
-            // No ffplay around: the game plays silent, nothing else changes.
+            // No audio device: the game plays silent, nothing else changes.
             off()
         },
     }
@@ -81,54 +54,10 @@ pub fn stop(m: Music) {
     }
 }
 
-// "   1.25 M-A: ..." → 1250. -1 when the segment is not a stats line (nan
-// at startup included).
-pub fn parse_clock_ms(seg: string) -> int {
-    let parts = seg.split("M-A:");
-    if (parts.len() < 2) {
-        return 0 - 1;
-    }
-    let head = parts[0].trim();
-    if (head.len() == 0) {
-        return 0 - 1;
-    }
-    let toks = head.split(" ");
-    let last = toks[toks.len() - 1];
-    let nums = last.split(".");
-    let sec = match (parse_int(nums[0])) {
-        Option.Some(n) => n,
-        Option.None => {
-            return 0 - 1;
-        },
-    };
-    if (sec < 0) {
-        return 0 - 1;
-    }
-    var frac = 0;
-    if (nums.len() > 1) {
-        let fs = nums[1];
-        frac = match (parse_int(fs)) {
-            Option.Some(n) => n,
-            Option.None => 0,
-        };
-        if (fs.len() == 1) {
-            frac = frac * 100;
-        } else if (fs.len() == 2) {
-            frac = frac * 10;
-        } else if (fs.len() > 3) {
-            frac = 0;
-        }
-    }
-    sec * 1000 + frac
-}
-
-fn pump(p: process.Proc, ch: Channel<int>) {
+fn pump(h: int, ch: Channel<int>) {
     let t = wsg.new_tracker();
-    let start_wall = time.monotonic();
+    let t0 = time.monotonic();
     var written = 0;
-    var clock = 0 - 1;
-    var clock_wall = 0;
-    var tail = "";
     var running = true;
     while (running) {
         var draining = true;
@@ -151,66 +80,24 @@ fn pump(p: process.Proc, ch: Channel<int>) {
                 },
             }
         }
-        // The playback clock, straight from ffplay's stats stream. Must be
-        // drained every pass anyway: Proc channels are bounded.
-        draining = true;
-        while (draining) {
-            match (try_recv(p.err)) {
-                Received.Got(chunk) => {
-                    match (from_utf8(chunk)) {
-                        Result.Ok(s) => {
-                            tail = tail + s;
-                        },
-                        Result.Err(bad) => { },
-                    }
-                },
-                Received.Empty => {
-                    draining = false;
-                },
-                Received.Closed => {
-                    draining = false;
-                },
-            }
-        }
-        let segs = tail.split("\r");
-        if (segs.len() > 1) {
-            var si = 0;
-            while (si < segs.len() - 1) {
-                let ms = parse_clock_ms(segs[si]);
-                if (ms >= 0) {
-                    clock = ms;
-                    clock_wall = time.monotonic();
-                }
-                si = si + 1;
-            }
-            tail = segs[segs.len() - 1];
-        }
-        if (tail.len() > 1024) {
-            tail = "";
-        }
         if (running) {
-            let now = time.monotonic();
-            // Estimated playhead: last reported clock advanced by the wall
-            // time since; before the first stats line, wall time since
-            // spawn (ffplay has not started playing — do not run ahead).
-            let playhead = if (clock >= 0) { clock + (now - clock_wall) } else { now - start_wall };
-            if (written - playhead > LEAD_MS) {
-                // Short naps keep both channels drained and events fresh.
+            let ahead = written - (time.monotonic() - t0);
+            if (ahead > LEAD_MS) {
+                // Short naps keep the events fresh.
                 time.sleep(20);
             } else {
-                match (p.write(wsg.tick(t))) {
+                match (audio.write(h, wsg.tick(t))) {
                     Result.Ok(n) => {
                         written = written + wsg.STEP_MS;
                     },
                     Result.Err(dead) => {
-                        // ffplay died or closed its end: fall silent, don't
-                        // crash the game.
+                        // Device gone: fall silent, don't crash the game.
                         running = false;
                     },
                 }
             }
         }
     }
-    p.close_stdin();
-    p.wait();
+    audio.drain(h);
+    close(h);
 }
