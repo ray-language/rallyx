@@ -1,6 +1,7 @@
 // The WSG synth and its reactive tracker, byte-deterministic: pitch table,
 // step rendering, event-driven states, and the danger predicate in rally.
 import std/random;
+import music;
 import rally;
 import wsg;
 
@@ -161,6 +162,18 @@ fn engine_states_change_the_drone_and_reset_restores_run() {
     assert(wsg.tick(fresh) != wsg.tick(limp));
     wsg.apply(idle, wsg.EV_RESET);
     assert_eq(idle.engine, wsg.ENGINE_RUN);
+}
+
+// The pump paces against ffplay's own playback clock, scraped from its
+// stats line on stderr — this parser is the whole feedback loop.
+@test
+fn ffplay_stats_clock_parses() {
+    assert_eq(music.parse_clock_ms("   1.25 M-A:  0.000 fd=   0 aq=    0KB"), 1250);
+    assert_eq(music.parse_clock_ms("   0.74 M-A: -0.000 aq=    0KB"), 740);
+    assert_eq(music.parse_clock_ms("  12.5 M-A:  0.000"), 12500);
+    assert_eq(music.parse_clock_ms("    nan M-A:  0.000"), 0 - 1);
+    assert_eq(music.parse_clock_ms("Input #0, s16le, from 'fd:':"), 0 - 1);
+    assert_eq(music.parse_clock_ms(""), 0 - 1);
 }
 
 @test

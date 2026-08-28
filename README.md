@@ -26,13 +26,14 @@ solo calla cuando el coche no está (choque, game over). La melodía es un **hom
 al galope del arcade (la partitura original es de Namco y no se transcribe):
 fanfarria mayor con galope de semicorcheas en el bajo y el giro descendente
 de cierre.
-La clave del patrón: la contrapresión de `Proc.write` es solo red de
-seguridad — ffplay traga el pipe hacia sus colas internas tan rápido como
-escribas, así que **tu propio adelanto ES la latencia evento→oído**. El
-pacing lo lleva un reloj absoluto con ~90 ms de adelanto, anclado *después*
-del primer write (el arranque de ffplay no se vuelve desfase permanente);
-con eso el retraso queda en ~130–240 ms en vez del segundo largo que salía
-con 250 ms de lead + ancla temprana.
+La clave del patrón: el pacing se regula contra **el reloj de reproducción
+del propio ffplay**, extraído de su línea de stats en stderr (`Proc.err`).
+El reloj de pared no sirve: `tools/audio_probe.ray` demostró que ffplay (y
+ffmpeg→AudioToolbox) tragan PCM sin frenar hacia colas ilimitadas — la
+contrapresión nunca actúa — y como reproducen a 1×, un arranque lento o un
+underrun se convierte en **desfase permanente** (el segundo de retraso que
+tuvo este juego). Con el lazo cerrado, el adelanto escrito converge a
+~130–220 ms medidos y se autocorrige.
 
 Con `std/inflate` en el lenguaje, rallyx trae ahora un **codec PNG puro en
 raylang** (`src/png.ray`: IDAT vía `zlib_inflate`, filtros 0–4, RGB/RGBA/
@@ -138,16 +139,21 @@ La disciplina de raygame (Tetris), con un reloj más y una cámara:
    audio *pull* de CoreAudio (sin callbacks C→raylang); ALSA (push) sí.
    La asimetría macOS/Linux es el argumento real para un `std/audio`.
 6. **El patrón `stdin_pipe` validado E2E** (VM y nativo, bajo pty, sin
-   zombies de ffplay al salir): `write` con contrapresión funciona tal cual
-   promete el REFERENCE, y la lección de dogfood es la **anatomía de la
-   latencia**: la contrapresión nunca llega a actuar (ffplay drena el pipe
-   a sus colas internas al instante), así que el retraso evento→oído es
-   exactamente el audio que TÚ llevas escrito por delante, más ~40 ms de
-   SDL. Tres reglas: adelanto pequeño (~90 ms — oscila en [LEAD,
-   LEAD+STEP]), anclar el reloj tras el PRIMER write (el spawn de ffplay no
-   debe volverse desfase permanente), y `-fflags nobuffer -flags low_delay`
-   por si acaso. Con 250 ms de lead + ancla temprana el juego sonaba ~1 s
-   tarde; así queda en ~130–240 ms. Dos detalles de
+   zombies de ffplay al salir) — y la lección de dogfood más fina del
+   proyecto, la **anatomía de la latencia de audio por pipe**, medida en
+   `tools/audio_probe.ray`: (a) ffplay Y ffmpeg→AudioToolbox tragan PCM sin
+   pacing hacia colas ilimitadas — la contrapresión de `Proc.write` nunca
+   llega a actuar; (b) el hijo reproduce a 1× y nunca recupera, así que su
+   arranque lento y cada underrun se acumulan como desfase PERMANENTE — con
+   reloj de pared el juego sonaba ~1 s tarde hiciera lo que hiciera el
+   lead; (c) la solución es cerrar el lazo con el **reloj de reproducción
+   real**: ffplay lo publica en su línea de stats por stderr
+   (`   1.25 M-A: …`), `Proc.err` lo entrega, y el pump escribe solo
+   mientras `written − playhead < 120 ms`. Convergencia medida: adelanto
+   estable en 130–220 ms, autocorregido tras cualquier hipo. Es el
+   argumento definitivo para un `std/audio` con PCM directo al dispositivo:
+   con pipe + scraping de stderr, ~150 ms es el suelo; con callback serían
+   ~15 ms. Dos detalles de
    lenguaje: `Channel.bounded` necesita anotación de tipo en el `let` (el
    build nativo lo exige; los tests VM nunca compilaron ese módulo), y la
    doc de `spawn` aún dice "Requires the VM engine" — otro caso de la nota

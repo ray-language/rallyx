@@ -1,0 +1,83 @@
+// rallyx — measures how a player child consumes unpaced PCM: a sink that
+// swallows everything buffers it all (event-to-ear delay = whatever you
+// wrote ahead, underruns become permanent lag); a device-paced sink parks
+// the writer at the real playback rate (backpressure is REAL and the
+// pipeline holds only its own small buffers).
+// Run: ray run tools/audio_probe.ray
+import std/process;
+import std/time;
+
+const CHUNK_SAMPLES: int = 1212;
+
+fn chunk() -> bytes {
+    // ~55 ms of a quiet 220 Hz-ish square so the run is audible but soft.
+    var out: [int] = [];
+    var i = 0;
+    while (i < CHUNK_SAMPLES) {
+        let v = if ((i / 50) % 2 == 0) { 900 } else { 0 - 900 };
+        out.push(v & 0xFF);
+        out.push((v >> 8) & 0xFF);
+        i = i + 1;
+    }
+    bytes_of(out)
+}
+
+fn probe(label: string, program: string, argv: [string]) {
+    let spawned = process.cmd(program, argv).stdin_pipe().stream();
+    let p = match (spawned) {
+        Result.Ok(proc) => proc,
+        Result.Err(e) => {
+            print(label + ": spawn failed: " + e);
+            return;
+        },
+    };
+    let data = chunk();
+    let t0 = time.monotonic();
+    var i = 0;
+    var ok = true;
+    while (i < 60 && ok) {
+        match (p.write(data)) {
+            Result.Ok(n) => { },
+            Result.Err(e) => {
+                print(label + ": write failed at chunk " + to_string(i) + ": " + e);
+                ok = false;
+            },
+        }
+        i = i + 1;
+        if (i % 15 == 0) {
+            let audio_ms = i * 55;
+            let wall_ms = time.monotonic() - t0;
+            print(
+                label + ": wrote " + to_string(audio_ms) + " ms of audio in " + to_string(wall_ms) + " ms wall (buffered ~" + to_string(
+                    audio_ms - wall_ms
+                ) + " ms)"
+            );
+        }
+    }
+    p.close_stdin();
+    p.kill(false);
+    p.wait();
+}
+
+fn main() -> int {
+    probe(
+        "ffplay          ",
+        "ffplay",
+        [
+            "-nodisp", "-autoexit", "-loglevel", "quiet",
+            "-probesize", "32", "-analyzeduration", "0",
+            "-fflags", "nobuffer", "-flags", "low_delay",
+            "-f", "s16le", "-ar", "22050", "-ch_layout", "mono", "-i", "-",
+        ]
+    );
+    probe(
+        "ffmpeg-atoolbox ",
+        "ffmpeg",
+        [
+            "-hide_banner", "-loglevel", "quiet",
+            "-f", "s16le", "-ar", "22050", "-ch_layout", "mono", "-i", "-",
+            "-f", "audiotoolbox", "default",
+        ]
+    );
+    0
+}
