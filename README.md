@@ -19,8 +19,10 @@ canal: **sirena** cuando un rojo vivo está a ≤6 celdas, **jingle** al coger
 bandera, **pshh de humo** (ruido LFSR de 15 bits que *roba la voz del
 arpegio* 3 pasos, como el WSG real robaba voces para los SFX), **barrido**
 al chocar, **despedida** en el game over y reset con `r`. Debajo de todo,
-el **drone del motor** (La grave con wobble en una 4ª voz), que solo calla
-cuando el coche no está (choque, game over). La melodía es un **homenaje**
+el **drone del motor** en una 4ª voz, ligado al coche real: zumba con
+wobble cuando rueda, baja a ralentí grave si está parado contra una pared,
+y **petardea** (un cilindro falla cada dos pasos) con el tanque vacío;
+solo calla cuando el coche no está (choque, game over). La melodía es un **homenaje**
 al galope del arcade (la partitura original es de Namco y no se transcribe):
 fanfarria mayor con galope de semicorcheas en el bajo y el giro descendente
 de cierre.
@@ -43,9 +45,17 @@ celda, la técnica de chafa/viu). El splash de arranque dibuja el coche desde
 - El coche **siempre avanza** en su rumbo. Las flechas **encolan** el giro:
   el coche lo toma en la primera bocacalle abierta (ninguna pulsación se
   pierde contra una pared — el volante de Pac-Man/Rally-X).
-- Ciudad de **48×32** calles con manzanas y tres plazas; viewport de 26×18
-  con cámara que sigue al coche, y radar 16×8 de toda la ciudad: tú (cian),
-  los rojos, las banderas (la especial en magenta).
+- Ciudad de **48×32** calles con manzanas, tres plazas y **dos túneles
+  laterales** (filas 13 y 19): salir por un borde es aparecer por el otro,
+  y el humo también cruza. Viewport de 26×18 con cámara que sigue al coche,
+  y radar 16×8 de toda la ciudad: tú (cian), los rojos, las banderas (la
+  especial en magenta).
+- **Baches** (▁▁ amarillos): pisarlos arrastra el coche unos turnos (150 →
+  260 ms por celda). Los rojos conocen sus calles y no se inmutan.
+- Los rojos cercanos (≤14 celdas) persiguen por **camino real (BFS)** —
+  rodean manzanas, cruzan túneles y no se dejan engañar por la distancia en
+  línea recta; de lejos van por olfato (greedy). Las rocas les cortan el
+  paso; el humo sigue siendo tu única arma.
 - **10 banderas** por ronda: la n-ésima vale `100×n`. Una es la **especial
   (S)**: desde que la coges, todo se **duplica**. Completar la ronda suma el
   combustible restante como bonus y trae un perseguidor más (hasta 4), un
@@ -94,9 +104,11 @@ La disciplina de raygame (Tetris), con un reloj más y una cámara:
 | Sprites half-block truecolor: splash con el coche + visor `--img` | ✅ |
 | Música WSG reactiva en vivo (sirena/jingle/choque/game over) vía `stdin_pipe` | ✅ |
 | SFX: pshh de humo (ruido LFSR, roba la voz del arpegio) + drone de motor | ✅ |
-| Tests (reglas + volante + cámara + frame + codec PNG + sprites + sinte) | ✅ 24 |
-| Bache que frena, persecución con lookahead (BFS), túneles laterales | 📋 v2 |
-| Sprites en celda de juego, rev del motor ligado a la velocidad real | 📋 v2 |
+| v2: túneles laterales con wrap (coche, humo y BFS los cruzan) | ✅ |
+| v2: baches que arrastran el coche; persecución BFS con radio + fallback | ✅ |
+| v2: motor ligado al coche real (rueda / ralentí / petardeo sin gasolina) | ✅ |
+| Tests (reglas + volante + cámara + frame + codec PNG + sprites + sinte) | ✅ 28 |
+| Sprites en celda de juego (necesita ≥8×8 px/celda: no cabe en un term 80×24) | 📋 v3 |
 
 ## Hallazgos de dogfood
 

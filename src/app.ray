@@ -52,6 +52,7 @@ struct App {
     quit: bool,
     music: music.Music,
     danger: bool,
+    engine: int,
     prev_score: int,
     prev_lives: int,
     prev_over: bool,
@@ -75,6 +76,18 @@ fn sync_music(a: App) {
         if (d != a.danger) {
             a.danger = d;
             music.send_event(a.music, if (d) { wsg.EV_DANGER_ON } else { wsg.EV_DANGER_OFF });
+        }
+        // The engine follows the real car: running, idling against a wall,
+        // or sputtering on an empty tank.
+        let est = if (a.g.fuel <= 0) { wsg.ENGINE_LIMP } else {
+            if (a.g.moved) { wsg.ENGINE_RUN } else { wsg.ENGINE_IDLE }
+        };
+        if (est != a.engine) {
+            a.engine = est;
+            let ev = if (est == wsg.ENGINE_LIMP) { wsg.EV_ENGINE_LIMP } else {
+                if (est == wsg.ENGINE_IDLE) { wsg.EV_ENGINE_IDLE } else { wsg.EV_ENGINE_RUN }
+            };
+            music.send_event(a.music, ev);
         }
     }
     a.prev_score = a.g.score;
@@ -115,6 +128,7 @@ fn on_key(a: App, k: Key) {
                 if (a.g.over) {
                     a.g = rally.new_game();
                     a.danger = false;
+                    a.engine = wsg.ENGINE_RUN;
                     a.prev_score = 0;
                     a.prev_lives = a.g.lives;
                     a.prev_over = false;
@@ -195,7 +209,7 @@ fn splash() {
 
 fn event_loop(with_music: bool) -> int {
     var empty: [string] = [];
-    let a = App { g: rally.new_game(), prev: empty, pending: b"", hiscore: load_hiscore(), paused: false, quit: false, music: if (with_music) { music.start() } else { music.off() }, danger: false, prev_score: 0, prev_lives: 3, prev_over: false };
+    let a = App { g: rally.new_game(), prev: empty, pending: b"", hiscore: load_hiscore(), paused: false, quit: false, music: if (with_music) { music.start() } else { music.off() }, danger: false, engine: wsg.ENGINE_RUN, prev_score: 0, prev_lives: 3, prev_over: false };
     let e = screen.esc();
     write_now(e + "[?1049h" + e + "[?25l" + e + "[2J" + e + "[H");
     splash();

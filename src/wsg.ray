@@ -236,6 +236,18 @@ pub const EV_RESET: int = 6;
 
 pub const EV_SMOKE: int = 7;
 
+pub const EV_ENGINE_RUN: int = 8;
+
+pub const EV_ENGINE_IDLE: int = 9;
+
+pub const EV_ENGINE_LIMP: int = 10;
+
+pub const ENGINE_RUN: int = 0;
+
+pub const ENGINE_IDLE: int = 1;
+
+pub const ENGINE_LIMP: int = 2;
+
 pub struct Tracker {
     step: int,
     danger: bool,
@@ -244,6 +256,7 @@ pub struct Tracker {
     puff: int,
     over: bool,
     over_steps: int,
+    engine: int,
     phases: [int],
     lfsr: int,
 }
@@ -257,6 +270,7 @@ pub fn new_tracker() -> Tracker {
         puff: 0,
         over: false,
         over_steps: 0,
+        engine: ENGINE_RUN,
         phases: [0, 0, 0, 0],
         lfsr: 0x4A1F
     }
@@ -271,6 +285,12 @@ pub fn apply(t: Tracker, ev: int) {
         t.jingle = 4;
     } else if (ev == EV_SMOKE) {
         t.puff = 3;
+    } else if (ev == EV_ENGINE_RUN) {
+        t.engine = ENGINE_RUN;
+    } else if (ev == EV_ENGINE_IDLE) {
+        t.engine = ENGINE_IDLE;
+    } else if (ev == EV_ENGINE_LIMP) {
+        t.engine = ENGINE_LIMP;
     } else if (ev == EV_CRASH) {
         t.crash = 6;
         t.jingle = 0;
@@ -288,6 +308,7 @@ pub fn apply(t: Tracker, ev: int) {
         t.jingle = 0;
         t.puff = 0;
         t.danger = false;
+        t.engine = ENGINE_RUN;
         t.step = 0;
     }
 }
@@ -329,9 +350,15 @@ fn current_voices(t: Tracker) -> [(int, int, int)] {
         let fade = [12, 8, 5];
         v2 = (NOISE, 60, fade[3 - t.puff]);
     }
-    // Engine drone: low A with a two-step wobble, always under the music.
-    let rumble = if (t.step % 2 == 0) { 33 } else { 34 };
-    let v3 = (BUZZ, rumble, 4);
+    // Engine drone under the music, following the real car: running hums
+    // with a two-step wobble, idling against a wall drops low and steady,
+    // an empty tank sputters (every other step the cylinder misses).
+    var v3 = (BUZZ, if (t.step % 2 == 0) { 33 } else { 34 }, 4);
+    if (t.engine == ENGINE_IDLE) {
+        v3 = (BUZZ, 30, 3);
+    } else if (t.engine == ENGINE_LIMP) {
+        v3 = (BUZZ, if (t.step % 2 == 0) { 31 } else { 29 }, if (t.step % 2 == 0) { 5 } else { 0 });
+    }
     return [v0, v1, v2, v3];
 }
 

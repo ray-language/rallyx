@@ -31,6 +31,10 @@ pub const FLAG_COUNT: int = 10;
 
 pub const ROCK_COUNT: int = 8;
 
+pub const BUMP_COUNT: int = 6;
+
+pub const SLOW_TICKS: int = 6;
+
 pub const PLAYER_X: int = 24;
 
 pub const PLAYER_Y: int = 30;
@@ -47,10 +51,13 @@ pub struct Game {
     smoke: [int],
     flags: [(int, int)],
     rocks: [(int, int)],
+    bumps: [(int, int)],
     special_x: int,
     special_y: int,
     player: Car,
     want: int,
+    slow: int,
+    moved: bool,
     enemies: [Car],
     fuel: int,
     score: int,
@@ -61,11 +68,25 @@ pub struct Game {
     over: bool,
 }
 
+// Two street rows pierce the side walls: driving off one edge comes out on
+// the other, Pac-Man style.
+pub fn is_tunnel_row(y: int) -> bool {
+    y == 13 || y == 19
+}
+
+// x with the side tunnels applied.
+fn wrap_x(x: int) -> int {
+    if (x < 0) { W - 1 } else if (x >= W) { 0 } else { x }
+}
+
 // The city: a closed border, streets on a grid (blocks 3 wide × 2 tall,
-// Rally-X proportions), and three carved plazas for open driving.
+// Rally-X proportions), three carved plazas, and the two side tunnels.
 fn is_street(x: int, y: int) -> bool {
-    if (x <= 0 || x >= W - 1 || y <= 0 || y >= H - 1) {
+    if (y <= 0 || y >= H - 1) {
         return false;
+    }
+    if (x <= 0 || x >= W - 1) {
+        return is_tunnel_row(y);
     }
     if (y % 3 == 1 || y == H - 2) {
         return true;
@@ -114,6 +135,15 @@ pub fn rock_at(g: Game, x: int, y: int) -> bool {
     false
 }
 
+pub fn bump_at(g: Game, x: int, y: int) -> bool {
+    for (bx, by) in g.bumps.iter() {
+        if (bx == x && by == y) {
+            return true;
+        }
+    }
+    false
+}
+
 fn enemy_at(g: Game, x: int, y: int) -> bool {
     for e in g.enemies {
         if (e.x == x && e.y == y) {
@@ -132,6 +162,8 @@ fn enemy_spawn(i: int) -> Car {
 fn reset_positions(g: Game) {
     g.player = Car { x: PLAYER_X, y: PLAYER_Y, dir: RIGHT, stun: 0 };
     g.want = RIGHT;
+    g.slow = 0;
+    g.moved = true;
     var es: [Car] = [];
     var i = 0;
     while (i < g.enemies.len()) {
@@ -219,6 +251,8 @@ fn setup_round(g: Game) {
     g.enemies = es;
     g.player = Car { x: PLAYER_X, y: PLAYER_Y, dir: RIGHT, stun: 0 };
     g.want = RIGHT;
+    g.slow = 0;
+    g.moved = true;
     var free = placement_cells(g);
     var flags: [(int, int)] = [];
     i = 0;
@@ -241,6 +275,15 @@ fn setup_round(g: Game) {
         i = i + 1;
     }
     g.rocks = rocks;
+    var bumps: [(int, int)] = [];
+    i = 0;
+    while (i < BUMP_COUNT && free.len() > 0) {
+        let j = random.below(free.len());
+        bumps.push(free[j]);
+        free = remove_at(free, j);
+        i = i + 1;
+    }
+    g.bumps = bumps;
 }
 
 pub fn new_game() -> Game {
@@ -262,16 +305,20 @@ pub fn new_game() -> Game {
     }
     var no_flags: [(int, int)] = [];
     var no_rocks: [(int, int)] = [];
+    var no_bumps: [(int, int)] = [];
     var no_enemies: [Car] = [];
     let g = Game {
         walls: walls,
         smoke: smoke,
         flags: no_flags,
         rocks: no_rocks,
+        bumps: no_bumps,
         special_x: 0,
         special_y: 0,
         player: Car { x: PLAYER_X, y: PLAYER_Y, dir: RIGHT, stun: 0 },
         want: RIGHT,
+        slow: 0,
+        moved: true,
         enemies: no_enemies,
         fuel: FUEL_MAX,
         score: 0,
@@ -337,8 +384,9 @@ fn pick_flag(g: Game) {
 }
 
 // One player tick: take the queued turn if that side is open, then advance
-// on the heading. A wall stops the car (idling burns fuel too); a rock is a
-// crash.
+// on the heading (through a side tunnel when the row has one). A wall stops
+// the car (idling burns fuel too), a rock is a crash, a bump slows the car
+// for SLOW_TICKS.
 pub fn step_player(g: Game) {
     if (g.over) {
         return;
@@ -347,24 +395,32 @@ pub fn step_player(g: Game) {
     if (g.fuel > 0) {
         g.fuel = g.fuel - 1;
     }
+    if (g.slow > 0) {
+        g.slow = g.slow - 1;
+    }
     if (g.want != g.player.dir) {
-        let wx = g.player.x + dir_dx(g.want);
+        let wx = wrap_x(g.player.x + dir_dx(g.want));
         let wy = g.player.y + dir_dy(g.want);
         if (!wall_at(g, wx, wy)) {
             g.player.dir = g.want;
         }
     }
-    let nx = g.player.x + dir_dx(g.player.dir);
+    let nx = wrap_x(g.player.x + dir_dx(g.player.dir));
     let ny = g.player.y + dir_dy(g.player.dir);
     if (wall_at(g, nx, ny)) {
+        g.moved = false;
         return;
     }
     if (rock_at(g, nx, ny)) {
         crash(g);
         return;
     }
+    g.moved = true;
     g.player.x = nx;
     g.player.y = ny;
+    if (bump_at(g, nx, ny)) {
+        g.slow = SLOW_TICKS;
+    }
     if (enemy_at(g, nx, ny)) {
         crash(g);
         return;
@@ -374,14 +430,14 @@ pub fn step_player(g: Game) {
 
 // Greedy chase: never reverse unless boxed in, prefer the passable dir that
 // closes the Manhattan distance, keep the current heading on ties.
-fn chase_dir(g: Game, e: Car) -> int {
+fn chase_dir_greedy(g: Game, e: Car) -> int {
     let reverse = (e.dir + 2) % 4;
     var best = reverse;
     var best_score = 999999;
     var d = 0;
     while (d < 4) {
         if (d != reverse) {
-            let nx = e.x + dir_dx(d);
+            let nx = wrap_x(e.x + dir_dx(d));
             let ny = e.y + dir_dy(d);
             if (!wall_at(g, nx, ny) && !rock_at(g, nx, ny)) {
                 var sc = (iabs(nx - g.player.x) + iabs(ny - g.player.y)) * 2;
@@ -399,6 +455,68 @@ fn chase_dir(g: Game, e: Car) -> int {
     best
 }
 
+// True shortest-path first move (BFS over streets, rocks block, tunnels
+// wrap), no reverse. Returns -1 when the player is not reached within the
+// exploration cap.
+fn chase_dir_bfs(g: Game, e: Car) -> int {
+    let reverse = (e.dir + 2) % 4;
+    var first: [int] = [];
+    var i = 0;
+    while (i < W * H) {
+        first.push(0 - 1);
+        i = i + 1;
+    }
+    first[e.y * W + e.x] = 4;
+    var qx: [int] = [];
+    var qy: [int] = [];
+    var d = 0;
+    while (d < 4) {
+        if (d != reverse) {
+            let nx = wrap_x(e.x + dir_dx(d));
+            let ny = e.y + dir_dy(d);
+            if (!wall_at(g, nx, ny) && !rock_at(g, nx, ny) && first[ny * W + nx] < 0) {
+                first[ny * W + nx] = d;
+                qx.push(nx);
+                qy.push(ny);
+            }
+        }
+        d = d + 1;
+    }
+    var head = 0;
+    while (head < qx.len() && head < 600) {
+        let cx = qx[head];
+        let cy = qy[head];
+        if (cx == g.player.x && cy == g.player.y) {
+            return first[cy * W + cx];
+        }
+        d = 0;
+        while (d < 4) {
+            let nx = wrap_x(cx + dir_dx(d));
+            let ny = cy + dir_dy(d);
+            if (!wall_at(g, nx, ny) && !rock_at(g, nx, ny) && first[ny * W + nx] < 0) {
+                first[ny * W + nx] = first[cy * W + cx];
+                qx.push(nx);
+                qy.push(ny);
+            }
+            d = d + 1;
+        }
+        head = head + 1;
+    }
+    0 - 1
+}
+
+// Near prey hunts by real path, far prey by scent: BFS inside a radius,
+// greedy outside (and as fallback when BFS gives up).
+fn chase_dir(g: Game, e: Car) -> int {
+    if (iabs(e.x - g.player.x) + iabs(e.y - g.player.y) <= 14) {
+        let d = chase_dir_bfs(g, e);
+        if (d >= 0 && d < 4) {
+            return d;
+        }
+    }
+    chase_dir_greedy(g, e)
+}
+
 // One chaser tick: stunned cars sit it out; driving into smoke consumes the
 // cloud and stuns; reaching the player is a crash.
 pub fn step_enemies(g: Game) {
@@ -413,7 +531,7 @@ pub fn step_enemies(g: Game) {
         } else {
             let d = chase_dir(g, e);
             e.dir = d;
-            let nx = e.x + dir_dx(d);
+            let nx = wrap_x(e.x + dir_dx(d));
             let ny = e.y + dir_dy(d);
             if (!wall_at(g, nx, ny) && !rock_at(g, nx, ny)) {
                 e.x = nx;
@@ -438,7 +556,7 @@ pub fn drop_smoke(g: Game) -> bool {
     if (g.over || g.fuel < SMOKE_COST) {
         return false;
     }
-    let bx = g.player.x - dir_dx(g.player.dir);
+    let bx = wrap_x(g.player.x - dir_dx(g.player.dir));
     let by = g.player.y - dir_dy(g.player.dir);
     if (wall_at(g, bx, by)) {
         return false;
@@ -462,9 +580,12 @@ pub fn danger(g: Game) -> bool {
 }
 
 // ms between player ticks: an empty tank halves the speed (the Rally-X
-// limp-home, not an instant death).
+// limp-home, not an instant death); a fresh bump drags almost as much.
 pub fn player_ms(g: Game) -> int {
-    if (g.fuel > 0) { 150 } else { 300 }
+    if (g.fuel <= 0) {
+        return 300;
+    }
+    if (g.slow > 0) { 260 } else { 150 }
 }
 
 // ms between chaser ticks: each round they close in a little faster.

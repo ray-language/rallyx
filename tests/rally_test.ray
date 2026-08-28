@@ -31,8 +31,14 @@ fn maze_is_well_formed_and_round_is_populated() {
     }
     var y = 0;
     while (y < rally.H) {
-        assert(rally.wall_at(g, 0, y));
-        assert(rally.wall_at(g, rally.W - 1, y));
+        if (rally.is_tunnel_row(y)) {
+            // The side tunnels pierce the wall on both ends.
+            assert(!rally.wall_at(g, 0, y));
+            assert(!rally.wall_at(g, rally.W - 1, y));
+        } else {
+            assert(rally.wall_at(g, 0, y));
+            assert(rally.wall_at(g, rally.W - 1, y));
+        }
         y = y + 1;
     }
     assert(!rally.wall_at(g, rally.PLAYER_X, rally.PLAYER_Y));
@@ -61,16 +67,74 @@ fn walls_stop_the_car_and_an_open_turn_is_taken_at_once() {
     g.want = rally.LEFT;
     let fuel_before = g.fuel;
     rally.step_player(g);
-    // Wall at x=0: the car idles but still burns fuel.
+    // Wall at x=0: the car idles but still burns fuel, and the engine layer
+    // sees it.
     assert_eq(g.player.x, 1);
     assert_eq(g.player.y, 1);
     assert_eq(g.fuel, fuel_before - 1);
+    assert(!g.moved);
     // An open turn applies on the very next tick — no dead keys.
     rally.turn(g, rally.RIGHT);
     rally.step_player(g);
     assert_eq(g.player.dir, rally.RIGHT);
     assert_eq(g.player.x, 2);
     assert_eq(g.player.y, 1);
+    assert(g.moved);
+}
+
+@test
+fn side_tunnels_wrap_the_car_and_its_smoke() {
+    let g = bare();
+    g.flags = [(5, 5)];
+    g.player.x = 1;
+    g.player.y = 13;
+    g.player.dir = rally.LEFT;
+    g.want = rally.LEFT;
+    rally.step_player(g);
+    assert_eq(g.player.x, 0);
+    rally.step_player(g);
+    // Off the left edge, out of the right one.
+    assert_eq(g.player.x, rally.W - 1);
+    assert_eq(g.player.y, 13);
+    // The smoke cloud drops behind, through the tunnel.
+    assert(rally.drop_smoke(g));
+    assert(g.smoke[13 * rally.W + 0] > 0);
+}
+
+@test
+fn bumps_drag_the_car_then_release_it() {
+    let g = bare();
+    g.flags = [(5, 5)];
+    g.bumps = [(2, 1)];
+    g.player.x = 1;
+    g.player.y = 1;
+    g.player.dir = rally.RIGHT;
+    assert_eq(rally.player_ms(g), 150);
+    rally.step_player(g);
+    assert_eq(g.player.x, 2);
+    assert_eq(g.slow, rally.SLOW_TICKS);
+    assert_eq(rally.player_ms(g), 260);
+    var i = 0;
+    while (i < rally.SLOW_TICKS) {
+        rally.step_player(g);
+        i = i + 1;
+    }
+    assert_eq(g.slow, 0);
+    assert_eq(rally.player_ms(g), 150);
+}
+
+@test
+fn bfs_chase_takes_the_real_path_not_the_scent() {
+    let g = bare();
+    // Enemy and player separated by a block: greedy (tie-broken toward its
+    // heading) would drift right; the shortest path goes LEFT around the
+    // block via column 1.
+    g.enemies = [rally.Car { x: 2, y: 4, dir: rally.UP, stun: 0 }];
+    g.player.x = 2;
+    g.player.y = 7;
+    rally.step_enemies(g);
+    assert_eq(g.enemies[0].x, 1);
+    assert_eq(g.enemies[0].y, 4);
 }
 
 // The reported bug: up pressed mid-corridor used to slam into the block wall

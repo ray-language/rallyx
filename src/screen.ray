@@ -78,6 +78,9 @@ fn cell_str(g: rally.Game, x: int, y: int) -> string {
     if (rally.rock_at(g, x, y)) {
         return paint(37, "◢◣");
     }
+    if (rally.bump_at(g, x, y)) {
+        return paint(33, "▁▁");
+    }
     if (g.walls[y * rally.W + x]) {
         return paint(34, "██");
     }

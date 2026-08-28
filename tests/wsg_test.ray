@@ -150,6 +150,20 @@ fn smoke_puff_steals_the_arp_voice_and_expires() {
 }
 
 @test
+fn engine_states_change_the_drone_and_reset_restores_run() {
+    let run = wsg.new_tracker();
+    let idle = wsg.new_tracker();
+    wsg.apply(idle, wsg.EV_ENGINE_IDLE);
+    assert(wsg.tick(run) != wsg.tick(idle));
+    let limp = wsg.new_tracker();
+    wsg.apply(limp, wsg.EV_ENGINE_LIMP);
+    let fresh = wsg.new_tracker();
+    assert(wsg.tick(fresh) != wsg.tick(limp));
+    wsg.apply(idle, wsg.EV_RESET);
+    assert_eq(idle.engine, wsg.ENGINE_RUN);
+}
+
+@test
 fn danger_predicate_sees_only_live_nearby_chasers() {
     random.seed(7);
     let g = rally.new_game();
