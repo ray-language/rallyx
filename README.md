@@ -16,7 +16,14 @@ entradas × 4 bits (`src/wsg.ray`, puro y determinista — la partitura se
 testea byte a byte), mezcladas a s16le 22050 Hz por una fibra (`src/music.ray`)
 que empuja un paso de 110 ms por escritura. El juego le manda eventos por
 canal: **sirena** cuando un rojo vivo está a ≤6 celdas, **jingle** al coger
-bandera, **barrido** al chocar, **despedida** en el game over y reset con `r`.
+bandera, **pshh de humo** (ruido LFSR de 15 bits que *roba la voz del
+arpegio* 3 pasos, como el WSG real robaba voces para los SFX), **barrido**
+al chocar, **despedida** en el game over y reset con `r`. Debajo de todo,
+el **drone del motor** (La grave con wobble en una 4ª voz), que solo calla
+cuando el coche no está (choque, game over). La melodía es un **homenaje**
+al galope del arcade (la partitura original es de Namco y no se transcribe):
+fanfarria mayor con galope de semicorcheas en el bajo y el giro descendente
+de cierre.
 La clave del patrón: la contrapresión de `Proc.write` es la red de seguridad,
 pero el *pacing* lo lleva un reloj absoluto que mantiene solo ~250 ms de
 audio por delante — con contrapresión sola, la sirena llegaría con el pipe
@@ -86,9 +93,10 @@ La disciplina de raygame (Tetris), con un reloj más y una cámara:
 | Codec PNG puro (decode 2/3/6 + filtros 0–4; encode stored+CRC) | ✅ |
 | Sprites half-block truecolor: splash con el coche + visor `--img` | ✅ |
 | Música WSG reactiva en vivo (sirena/jingle/choque/game over) vía `stdin_pipe` | ✅ |
-| Tests (reglas + volante + cámara + frame + codec PNG + sprites + sinte) | ✅ 23 |
+| SFX: pshh de humo (ruido LFSR, roba la voz del arpegio) + drone de motor | ✅ |
+| Tests (reglas + volante + cámara + frame + codec PNG + sprites + sinte) | ✅ 24 |
 | Bache que frena, persecución con lookahead (BFS), túneles laterales | 📋 v2 |
-| Sprites en celda de juego, efectos de sonido puntuales (humo, motor) | 📋 v2 |
+| Sprites en celda de juego, rev del motor ligado a la velocidad real | 📋 v2 |
 
 ## Hallazgos de dogfood
 

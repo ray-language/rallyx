@@ -1,9 +1,12 @@
-// rallyx — a Namco-WSG-style synth, pure and clock-free: 3 voices reading
-// 32-entry 4-bit wavetables through a phase accumulator, mixed to s16le
-// mono. On top, the tracker: a 32-step looping tune (melody/bass/arpeggio)
-// with reactive states — chase siren, flag jingle, crash sweep, game-over
-// descent. The music fiber owns the clock; everything here is deterministic,
-// so the whole score is testable byte by byte.
+// rallyx — a Namco-WSG-style synth, pure and clock-free: wavetable voices
+// (32-entry, 4-bit) plus an LFSR noise voice, read through phase
+// accumulators and mixed to s16le mono. On top, the tracker: a 32-step
+// looping tune (melody/bass/arpeggio, an homage to the arcade's gallop —
+// the original score is Namco's, this one is ours) with reactive states:
+// chase siren, flag jingle, crash sweep, game-over descent, a smoke "pshh"
+// that STEALS the arpeggio voice like the real WSG stole voices for SFX,
+// and a constant engine drone underneath. The music fiber owns the clock;
+// everything here is deterministic, so the score is testable byte by byte.
 
 pub const RATE: int = 22050;
 
@@ -14,6 +17,8 @@ pub const SAMPLES_PER_STEP: int = 2425;
 pub const TONE: int = 0;
 
 pub const BUZZ: int = 1;
+
+pub const NOISE: int = 2;
 
 // Soft flute-ish table (sine-like), values 0..15 like the arcade's PROM.
 fn tone_table() -> [int] {
@@ -53,7 +58,7 @@ fn tone_table() -> [int] {
     ]
 }
 
-// Hollow square with a notch — the "engine" voice.
+// Hollow square with a notch — the "engine" flavor.
 fn buzz_table() -> [int] {
     [
         15,
@@ -99,77 +104,78 @@ pub fn freq_of(midi: int) -> int {
     if (oct >= 0) { f << oct } else { f >> 0 - oct }
 }
 
-// ---- the tune (32 sixteenth steps, two bars, C major, arcade-fast) --------
+// ---- the tune: 32 sixteenth steps, the arcade gallop as an homage --------
 
 fn melody() -> [int] {
     [
         72,
-        76,
-        79,
-        84,
-        79,
-        76,
         72,
-        76,
-        74,
-        77,
-        81,
-        83,
-        81,
-        77,
-        74,
-        77,
-        76,
         79,
-        84,
-        88,
-        84,
         79,
         76,
-        79,
-        77,
-        74,
-        71,
-        74,
+        76,
         72,
         0,
+        74,
+        74,
+        81,
+        81,
+        77,
+        77,
+        74,
+        0,
+        76,
+        76,
+        84,
+        84,
+        79,
+        79,
+        76,
+        0,
+        77,
+        76,
+        74,
+        72,
+        71,
+        74,
         72,
         0
     ]
 }
 
+// Galloping bass: root/octave/fifth/octave in sixteenths.
 fn bass() -> [int] {
     [
         48,
-        0,
+        60,
         55,
-        0,
+        60,
         48,
-        0,
+        60,
         55,
-        0,
+        60,
         50,
-        0,
+        62,
         57,
-        0,
+        62,
         50,
-        0,
+        62,
         57,
-        0,
+        62,
         52,
-        0,
+        64,
         59,
-        0,
+        64,
         52,
-        0,
+        64,
         59,
-        0,
+        64,
         43,
-        0,
+        55,
         47,
-        0,
+        59,
         48,
-        0,
+        60,
         48,
         0
     ]
@@ -228,14 +234,18 @@ pub const EV_OVER: int = 5;
 
 pub const EV_RESET: int = 6;
 
+pub const EV_SMOKE: int = 7;
+
 pub struct Tracker {
     step: int,
     danger: bool,
     jingle: int,
     crash: int,
+    puff: int,
     over: bool,
     over_steps: int,
     phases: [int],
+    lfsr: int,
 }
 
 pub fn new_tracker() -> Tracker {
@@ -244,9 +254,11 @@ pub fn new_tracker() -> Tracker {
         danger: false,
         jingle: 0,
         crash: 0,
+        puff: 0,
         over: false,
         over_steps: 0,
-        phases: [0, 0, 0]
+        phases: [0, 0, 0, 0],
+        lfsr: 0x4A1F
     }
 }
 
@@ -257,41 +269,48 @@ pub fn apply(t: Tracker, ev: int) {
         t.danger = false;
     } else if (ev == EV_FLAG) {
         t.jingle = 4;
+    } else if (ev == EV_SMOKE) {
+        t.puff = 3;
     } else if (ev == EV_CRASH) {
         t.crash = 6;
         t.jingle = 0;
+        t.puff = 0;
     } else if (ev == EV_OVER) {
         t.over = true;
         t.over_steps = 12;
         t.crash = 0;
         t.jingle = 0;
+        t.puff = 0;
     } else if (ev == EV_RESET) {
         t.over = false;
         t.over_steps = 0;
         t.crash = 0;
         t.jingle = 0;
+        t.puff = 0;
         t.danger = false;
         t.step = 0;
     }
 }
 
-// The three (wave, midi, vol) voices for the current step, by priority:
-// game-over descent > crash sweep > (siren | tune) + flag jingle on voice 2.
+// The four (wave, midi, vol) voices for the current step, by priority:
+// game-over descent > crash sweep > (siren | tune); the smoke puff steals
+// voice 2 (over the jingle), and voice 3 is the engine drone — silent only
+// when the car itself is out of the picture (crash, game over).
 fn current_voices(t: Tracker) -> [(int, int, int)] {
     if (t.over) {
         if (t.over_steps <= 0) {
-            return [(TONE, 0, 0), (TONE, 0, 0), (TONE, 0, 0)];
+            return [(TONE, 0, 0), (TONE, 0, 0), (TONE, 0, 0), (TONE, 0, 0)];
         }
         // A slow chromatic farewell.
         let n = 72 - (12 - t.over_steps);
-        return [(TONE, n, 12), (BUZZ, n - 24, 9), (TONE, 0, 0)];
+        return [(TONE, n, 12), (BUZZ, n - 24, 9), (TONE, 0, 0), (TONE, 0, 0)];
     }
     if (t.crash > 0) {
         let n = 70 - (6 - t.crash) * 3;
-        return [(BUZZ, n, 13), (BUZZ, n - 12, 10), (TONE, 0, 0)];
+        return [(BUZZ, n, 13), (BUZZ, n - 12, 10), (TONE, 0, 0), (TONE, 0, 0)];
     }
     var v0 = (TONE, melody()[t.step % 32], 10);
-    var v1 = (BUZZ, bass()[t.step % 32], 9);
+    var v1 = (BUZZ, bass()[t.step % 32], 8);
     var v2 = (TONE, arp()[t.step % 32], 5);
     if (t.danger) {
         // The chase siren: two alternating tones over a tritone pulse.
@@ -304,7 +323,16 @@ fn current_voices(t: Tracker) -> [(int, int, int)] {
         let ladder = [84, 88, 91, 96];
         v2 = (TONE, ladder[4 - t.jingle], 14);
     }
-    return [v0, v1, v2];
+    if (t.puff > 0) {
+        // The smoke hiss decays over three steps and outranks the jingle —
+        // exactly the voice-stealing the arcade did.
+        let fade = [12, 8, 5];
+        v2 = (NOISE, 60, fade[3 - t.puff]);
+    }
+    // Engine drone: low A with a two-step wobble, always under the music.
+    let rumble = if (t.step % 2 == 0) { 33 } else { 34 };
+    let v3 = (BUZZ, rumble, 4);
+    return [v0, v1, v2, v3];
 }
 
 // Render one step of audio and advance the tracker. s16le mono bytes.
@@ -325,15 +353,25 @@ pub fn tick(t: Tracker) -> bytes {
     while (i < SAMPLES_PER_STEP) {
         var acc = 0;
         var v = 0;
-        while (v < 3) {
+        while (v < 4) {
             if (vols[v] > 0) {
-                let idx = t.phases[v] >> 16 & 31;
-                acc = acc + (tables[waves[v]][idx] - 8) * vols[v];
-                t.phases[v] = t.phases[v] + incs[v];
+                if (waves[v] == NOISE) {
+                    // 15-bit LFSR hiss, advanced every other sample so the
+                    // puff sounds like air rather than static.
+                    if ((i & 1) == 0) {
+                        let bit = (t.lfsr ^ t.lfsr >> 1) & 1;
+                        t.lfsr = t.lfsr >> 1 | bit << 14;
+                    }
+                    acc = acc + ((t.lfsr & 1) * 14 - 7) * vols[v];
+                } else {
+                    let idx = t.phases[v] >> 16 & 31;
+                    acc = acc + (tables[waves[v]][idx] - 8) * vols[v];
+                    t.phases[v] = t.phases[v] + incs[v];
+                }
             }
             v = v + 1;
         }
-        let sample = acc * 90;
+        let sample = acc * 72;
         out.push(sample & 0xFF);
         out.push(sample >> 8 & 0xFF);
         i = i + 1;
@@ -341,6 +379,9 @@ pub fn tick(t: Tracker) -> bytes {
     t.step = (t.step + 1) % 32;
     if (t.jingle > 0) {
         t.jingle = t.jingle - 1;
+    }
+    if (t.puff > 0) {
+        t.puff = t.puff - 1;
     }
     if (t.crash > 0) {
         t.crash = t.crash - 1;

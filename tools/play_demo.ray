@@ -37,6 +37,7 @@ fn main() -> int {
     // (event, steps to play after it); 0 = no event.
     let script = [
         (0, 12),
+        (wsg.EV_SMOKE, 5),
         (wsg.EV_DANGER_ON, 8),
         (wsg.EV_DANGER_OFF, 4),
         (wsg.EV_FLAG, 6),

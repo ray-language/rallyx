@@ -130,6 +130,26 @@ fn flag_jingle_and_crash_sweep_expire_on_their_own() {
 }
 
 @test
+fn smoke_puff_steals_the_arp_voice_and_expires() {
+    // Deterministic across trackers, LFSR included.
+    let a = wsg.new_tracker();
+    let b = wsg.new_tracker();
+    wsg.apply(a, wsg.EV_SMOKE);
+    wsg.apply(b, wsg.EV_SMOKE);
+    assert_eq(wsg.tick(a), wsg.tick(b));
+    // The hiss changes the mix for exactly three steps.
+    let plain = wsg.new_tracker();
+    let puffed = wsg.new_tracker();
+    wsg.apply(puffed, wsg.EV_SMOKE);
+    var i = 0;
+    while (i < 3) {
+        assert(wsg.tick(plain) != wsg.tick(puffed));
+        i = i + 1;
+    }
+    assert_eq(puffed.puff, 0);
+}
+
+@test
 fn danger_predicate_sees_only_live_nearby_chasers() {
     random.seed(7);
     let g = rally.new_game();

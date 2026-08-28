@@ -107,7 +107,9 @@ fn on_key(a: App, k: Key) {
                 a.paused = !a.paused;
             } else if (c == ' ') {
                 if (!a.paused) {
-                    rally.drop_smoke(a.g);
+                    if (rally.drop_smoke(a.g)) {
+                        music.send_event(a.music, wsg.EV_SMOKE);
+                    }
                 }
             } else if (c == 'r') {
                 if (a.g.over) {

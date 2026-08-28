@@ -129,7 +129,7 @@ fn smoke_costs_fuel_and_stuns_the_chaser_that_drives_in() {
     g.player.y = 1;
     g.player.dir = rally.RIGHT;
     let fuel_before = g.fuel;
-    rally.drop_smoke(g);
+    assert(rally.drop_smoke(g));
     // The cloud lands behind the car.
     assert(g.smoke[1 * rally.W + 2] > 0);
     assert_eq(g.fuel, fuel_before - rally.SMOKE_COST);
@@ -197,7 +197,7 @@ fn empty_tank_slows_the_car_and_blocks_smoke() {
     g.player.x = 3;
     g.player.y = 1;
     g.player.dir = rally.RIGHT;
-    rally.drop_smoke(g);
+    assert(!rally.drop_smoke(g));
     assert_eq(g.smoke[1 * rally.W + 2], 0);
     assert_eq(g.fuel, rally.SMOKE_COST - 1);
 }

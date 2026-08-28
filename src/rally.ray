@@ -432,18 +432,20 @@ pub fn step_enemies(g: Game) {
     }
 }
 
-// Lay smoke on the cell just behind the car. Costs fuel; needs a street cell.
-pub fn drop_smoke(g: Game) {
+// Lay smoke on the cell just behind the car. Costs fuel; needs a street
+// cell. Returns whether a cloud actually came out (the sound layer cares).
+pub fn drop_smoke(g: Game) -> bool {
     if (g.over || g.fuel < SMOKE_COST) {
-        return;
+        return false;
     }
     let bx = g.player.x - dir_dx(g.player.dir);
     let by = g.player.y - dir_dy(g.player.dir);
     if (wall_at(g, bx, by)) {
-        return;
+        return false;
     }
     g.smoke[by * W + bx] = SMOKE_TICKS;
     g.fuel = g.fuel - SMOKE_COST;
+    true
 }
 
 // A live chaser this close means the siren: the music layer polls it.
