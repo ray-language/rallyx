@@ -10,40 +10,6 @@ fn esc() -> string {
     "\u{1B}"
 }
 
-fn env_has(name: string) -> bool {
-    match (env(name)) {
-        Option.Some(v) => v.len() > 0,
-        Option.None => false,
-    }
-}
-
-fn term_contains(needle: string) -> bool {
-    match (env("TERM")) {
-        Option.Some(v) => v.contains(needle),
-        Option.None => false,
-    }
-}
-
-// Whether to drive the kitty graphics protocol. `detected` is what
-// term.capabilities() decided (a TERM/KITTY_WINDOW_ID heuristic that misses
-// Ghostty and other kitty-capable terminals), so we widen it: Ghostty
-// (TERM=xterm-ghostty, GHOSTTY_* in the environment) and anything kitty-ish
-// count too. RALLYX_KITTY=1/0 forces the decision when a terminal lies.
-pub fn use_kitty(detected: bool) -> bool {
-    match (env("RALLYX_KITTY")) {
-        Option.Some(v) => {
-            return v == "1" || v == "true";
-        },
-        Option.None => { },
-    }
-    if (detected) {
-        return true;
-    }
-    return env_has("KITTY_WINDOW_ID") || env_has("GHOSTTY_RESOURCES_DIR") || env_has(
-        "GHOSTTY_BIN_DIR"
-    ) || term_contains("kitty") || term_contains("ghostty");
-}
-
 fn channel(img: image.Image, x: int, y: int, c: int) -> int {
     img.pixels[(y * img.width + x) * 4 + c]
 }

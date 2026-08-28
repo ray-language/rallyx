@@ -217,7 +217,7 @@ fn splash(caps: term.Capabilities) {
         krows = 1;
     }
     var caprow = 3 + (img.height + 1) / 2;
-    if (sprite.use_kitty(caps.kitty_graphics)) {
+    if (caps.kitty_graphics) {
         out = out + e + "[2;3H" + sprite.kitty_png_box(data, img.width / 3, krows);
         caprow = 3 + krows;
     } else {
