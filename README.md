@@ -117,13 +117,13 @@ La disciplina de raygame (Tetris), con un reloj más y una cámara:
 | v2: túneles laterales con wrap (coche, humo y BFS los cruzan) | ✅ |
 | v2: baches que arrastran el coche; persecución BFS con radio + fallback | ✅ |
 | v2: motor ligado al coche real (rueda / ralentí / petardeo sin gasolina) | ✅ |
-| Tests (reglas + volante + cámara + frame + PNG diferencial + sprites + sinte) | ✅ 31 |
+| Tests (reglas + volante + cámara + frame + PNG diferencial + sprites + sinte) | ✅ 30 |
 | Sprites en celda de juego (necesita ≥8×8 px/celda: no cabe en un term 80×24) | 📋 v3 |
 
 ## Hallazgos de dogfood
 
 1. **`ray build --native -o X` sobre un `X` existente → SIGKILL en macOS**
-   (anotado en `raylang/IDEAS.md` §77): sobrescribir el binario in-place
+   (reportado al proyecto raylang): sobrescribir el binario in-place
    invalida la firma ad-hoc y el kernel mata el proceso al exec (exit 137,
    incluso `--help`). Workaround: `rm -f` antes de recompilar. Propuesta:
    que `ray build` haga unlink/rename del output.
@@ -133,7 +133,7 @@ La disciplina de raygame (Tetris), con un reloj más y una cámara:
 3. Lo demás salió a la primera sobre la superficie M115–M127 (v1 del juego:
    tests 8/8 y pty al primer intento).
 3b. **`term.capabilities()` no es reentrante dentro de `term.raw`**
-   (`raylang/IDEAS.md` §80): llamada dentro de nuestra sesión raw, su
+   (reportado al proyecto raylang): llamada dentro de nuestra sesión raw, su
    restauración interna deja el terminal cocinado → todas las teclas
    muertas. Workaround aplicado: detectarla ANTES de `term.raw` y pasar el
    struct. Moraleja de arnés: `script -q` de macOS ni responde DA1 ni
@@ -179,7 +179,7 @@ La disciplina de raygame (Tetris), con un reloj más y una cámara:
    sería la latencia: sigue haciendo falta el adelanto de reloj de pared
    (~100 ms). La gran mejora es el modo de fallo: tras un hueco el
    dispositivo reproduce lo nuevo al instante (autocura, sin el desfase
-   permanente de ffplay). Anotado en `raylang/IDEAS.md` §81: o un tope de
+   permanente de ffplay). Propuesto al proyecto raylang: o un tope de
    cola configurable en `open` (latency hint) o un `audio.played_ms(h)`
    para cerrar el lazo sin reloj propio.
 

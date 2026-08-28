@@ -14,6 +14,10 @@ pub const STEP_MS: int = 110;
 
 pub const SAMPLES_PER_STEP: int = 2425;
 
+// A tick renders HALF a musical step: events picked up between ticks land
+// on the ear a sub-step (55 ms) sooner.
+pub const SUB_MS: int = 55;
+
 pub const TONE: int = 0;
 
 pub const BUZZ: int = 1;
@@ -257,6 +261,7 @@ pub struct Tracker {
     over: bool,
     over_steps: int,
     engine: int,
+    sub: int,
     phases: [int],
     lfsr: int,
 }
@@ -271,6 +276,7 @@ pub fn new_tracker() -> Tracker {
         over: false,
         over_steps: 0,
         engine: ENGINE_RUN,
+        sub: 0,
         phases: [0, 0, 0, 0],
         lfsr: 0x4A1F
     }
@@ -310,6 +316,7 @@ pub fn apply(t: Tracker, ev: int) {
         t.danger = false;
         t.engine = ENGINE_RUN;
         t.step = 0;
+        t.sub = 0;
     }
 }
 
@@ -362,7 +369,10 @@ fn current_voices(t: Tracker) -> [(int, int, int)] {
     return [v0, v1, v2, v3];
 }
 
-// Render one step of audio and advance the tracker. s16le mono bytes.
+// Render one SUB-step (55 ms) of audio and advance the tracker; the
+// musical position moves every second tick. Voices are recomputed each
+// call, so an applied event is audible at the next sub-step boundary.
+// s16le mono bytes.
 pub fn tick(t: Tracker) -> bytes {
     let voices = current_voices(t);
     let tables = [tone_table(), buzz_table()];
@@ -375,9 +385,10 @@ pub fn tick(t: Tracker) -> bytes {
         vols.push(if (midi > 0) { vol } else { 0 });
         waves.push(wave);
     }
+    let n = if (t.sub == 0) { 1213 } else { SAMPLES_PER_STEP - 1213 };
     var out: [int] = [];
     var i = 0;
-    while (i < SAMPLES_PER_STEP) {
+    while (i < n) {
         var acc = 0;
         var v = 0;
         while (v < 4) {
@@ -403,18 +414,21 @@ pub fn tick(t: Tracker) -> bytes {
         out.push(sample >> 8 & 0xFF);
         i = i + 1;
     }
-    t.step = (t.step + 1) % 32;
-    if (t.jingle > 0) {
-        t.jingle = t.jingle - 1;
-    }
-    if (t.puff > 0) {
-        t.puff = t.puff - 1;
-    }
-    if (t.crash > 0) {
-        t.crash = t.crash - 1;
-    }
-    if (t.over_steps > 0) {
-        t.over_steps = t.over_steps - 1;
+    t.sub = 1 - t.sub;
+    if (t.sub == 0) {
+        t.step = (t.step + 1) % 32;
+        if (t.jingle > 0) {
+            t.jingle = t.jingle - 1;
+        }
+        if (t.puff > 0) {
+            t.puff = t.puff - 1;
+        }
+        if (t.crash > 0) {
+            t.crash = t.crash - 1;
+        }
+        if (t.over_steps > 0) {
+            t.over_steps = t.over_steps - 1;
+        }
     }
     bytes_of(out)
 }

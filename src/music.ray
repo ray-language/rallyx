@@ -14,7 +14,7 @@ import std/audio;
 import std/time;
 import wsg;
 
-const LEAD_MS: int = 100;
+const LEAD_MS: int = 60;
 
 pub struct Music {
     ch: Channel<int>,
@@ -88,7 +88,7 @@ fn pump(h: int, ch: Channel<int>) {
             } else {
                 match (audio.write(h, wsg.tick(t))) {
                     Result.Ok(n) => {
-                        written = written + wsg.STEP_MS;
+                        written = written + wsg.SUB_MS;
                     },
                     Result.Err(dead) => {
                         // Device gone: fall silent, don't crash the game.

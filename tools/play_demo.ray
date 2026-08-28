@@ -29,8 +29,9 @@ fn main() -> int {
         if (ev != 0) {
             wsg.apply(t, ev);
         }
+        // Two sub-step ticks per musical step.
         var i = 0;
-        while (i < n) {
+        while (i < n * 2) {
             match (audio.write(h, wsg.tick(t))) {
                 Result.Ok(w) => { },
                 Result.Err(e) => {
@@ -38,9 +39,9 @@ fn main() -> int {
                     return 1;
                 },
             }
-            steps = steps + 1;
             i = i + 1;
         }
+        steps = steps + n;
     }
     audio.drain(h);
     close(h);

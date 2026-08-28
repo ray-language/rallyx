@@ -19,9 +19,10 @@ fn pitch_table_hits_the_tuning_anchors() {
 }
 
 @test
-fn a_tick_is_one_step_of_s16le_within_range() {
+fn two_sub_ticks_make_one_step_of_s16le_within_range() {
     let t = wsg.new_tracker();
-    let b = wsg.tick(t);
+    // A tick is half a musical step; two of them are exactly one step.
+    let b = wsg.tick(t) + wsg.tick(t);
     assert_eq(b.len(), wsg.SAMPLES_PER_STEP * 2);
     var peak = 0;
     var nonzero = 0;
@@ -78,7 +79,7 @@ fn game_over_descends_then_falls_silent_and_reset_revives() {
     let t = wsg.new_tracker();
     wsg.apply(t, wsg.EV_OVER);
     var i = 0;
-    while (i < 12) {
+    while (i < 24) {
         wsg.tick(t);
         i = i + 1;
     }
@@ -111,7 +112,7 @@ fn flag_jingle_and_crash_sweep_expire_on_their_own() {
     let flagged = wsg.new_tracker();
     wsg.apply(flagged, wsg.EV_FLAG);
     var i = 0;
-    while (i < 4) {
+    while (i < 8) {
         assert(wsg.tick(plain) != wsg.tick(flagged));
         i = i + 1;
     }
@@ -120,7 +121,7 @@ fn flag_jingle_and_crash_sweep_expire_on_their_own() {
     let crashed = wsg.new_tracker();
     wsg.apply(crashed, wsg.EV_CRASH);
     i = 0;
-    while (i < 6) {
+    while (i < 12) {
         wsg.tick(crashed);
         i = i + 1;
     }
@@ -142,7 +143,7 @@ fn smoke_puff_steals_the_arp_voice_and_expires() {
     let puffed = wsg.new_tracker();
     wsg.apply(puffed, wsg.EV_SMOKE);
     var i = 0;
-    while (i < 3) {
+    while (i < 6) {
         assert(wsg.tick(plain) != wsg.tick(puffed));
         i = i + 1;
     }
