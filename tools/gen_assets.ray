@@ -2,6 +2,7 @@
 // here and written out as a real RGBA PNG by the pure-raylang encoder.
 // Run from the project root: ray run tools/gen_assets.ray
 import std/fs;
+import std/image;
 import png;
 
 fn color_of(c: char) -> int {
@@ -74,6 +75,20 @@ fn main() -> int {
     };
     fs.write_bytes(h, data);
     close(h);
+    // The encoder's output must survive std/image's strict decode (CRCs
+    // included) — the same check the game does at splash time.
+    match (image.decode_png(data)) {
+        Result.Ok(back) => {
+            if (back.width != img.w || back.height != img.h) {
+                eprint("gen_assets: std/image round-trip size mismatch");
+                return 1;
+            }
+        },
+        Result.Err(e) => {
+            eprint("gen_assets: std/image rejects the asset: " + e);
+            return 1;
+        },
+    }
     print(
         "assets/car.png: " + to_string(data.len()) + " bytes, " + to_string(img.w) + "x" + to_string(img.h)
     );

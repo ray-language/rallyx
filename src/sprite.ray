@@ -1,48 +1,52 @@
-// rallyx — truecolor half-block sprite renderer: each terminal cell is two
-// stacked pixels (▀ with 24-bit fg = top, bg = bottom), the technique of
-// chafa/viu. Alpha < 128 is transparent (the terminal's own background
-// shows through).
-import png;
+// rallyx — drawing decoded images (std/image RGBA8) in the terminal, best
+// capability first: real pixels over the kitty graphics protocol when
+// term.capabilities() says so, truecolor half-blocks (▀ fg = top pixel,
+// bg = bottom pixel — chafa/viu's technique) everywhere else. Alpha < 128
+// is transparent.
+import std/base64;
+import std/image;
 
 fn esc() -> string {
     "\u{1B}"
 }
 
-fn fg(p: int) -> string {
+fn channel(img: image.Image, x: int, y: int, c: int) -> int {
+    img.pixels[(y * img.width + x) * 4 + c]
+}
+
+fn fg(img: image.Image, x: int, y: int) -> string {
     esc() + "[38;2;" + to_string(
-        png.pixel_r(p)
-    ) + ";" + to_string(png.pixel_g(p)) + ";" + to_string(png.pixel_b(p)) + "m"
+        channel(img, x, y, 0)
+    ) + ";" + to_string(channel(img, x, y, 1)) + ";" + to_string(channel(img, x, y, 2)) + "m"
 }
 
-fn bg(p: int) -> string {
+fn bg(img: image.Image, x: int, y: int) -> string {
     esc() + "[48;2;" + to_string(
-        png.pixel_r(p)
-    ) + ";" + to_string(png.pixel_g(p)) + ";" + to_string(png.pixel_b(p)) + "m"
+        channel(img, x, y, 0)
+    ) + ";" + to_string(channel(img, x, y, 1)) + ";" + to_string(channel(img, x, y, 2)) + "m"
 }
 
-fn opaque(p: int) -> bool {
-    png.pixel_a(p) >= 128
+fn opaque(img: image.Image, x: int, y: int) -> bool {
+    channel(img, x, y, 3) >= 128
 }
 
 // One text line per two pixel rows. Every line ends with a reset so the
 // sprite composes into any frame.
-pub fn render(img: png.Image) -> [string] {
+pub fn render(img: image.Image) -> [string] {
     var out: [string] = [];
     var y = 0;
-    while (y < img.h) {
+    while (y < img.height) {
         var line = "";
         var x = 0;
-        while (x < img.w) {
-            let top = img.pixels[y * img.w + x];
-            let bottom = if (y + 1 < img.h) { img.pixels[(y + 1) * img.w + x] } else { 0 };
-            let top_on = opaque(top);
-            let bottom_on = y + 1 < img.h && opaque(bottom);
+        while (x < img.width) {
+            let top_on = opaque(img, x, y);
+            let bottom_on = y + 1 < img.height && opaque(img, x, y + 1);
             if (top_on && bottom_on) {
-                line = line + fg(top) + bg(bottom) + "▀";
+                line = line + fg(img, x, y) + bg(img, x, y + 1) + "▀";
             } else if (top_on) {
-                line = line + esc() + "[0m" + fg(top) + "▀";
+                line = line + esc() + "[0m" + fg(img, x, y) + "▀";
             } else if (bottom_on) {
-                line = line + esc() + "[0m" + fg(bottom) + "▄";
+                line = line + esc() + "[0m" + fg(img, x, y + 1) + "▄";
             } else {
                 line = line + esc() + "[0m ";
             }
@@ -50,6 +54,28 @@ pub fn render(img: png.Image) -> [string] {
         }
         out.push(line + esc() + "[0m");
         y = y + 2;
+    }
+    out
+}
+
+// The kitty graphics protocol: the PNG file itself, base64ed into APC
+// escapes, chunked at 4096 payload bytes (m=1 … m=0). The terminal decodes
+// the PNG — we just deliver it at the cursor.
+pub fn kitty_png(data: bytes) -> string {
+    let b64 = base64.base64(data);
+    var out = "";
+    var off = 0;
+    var first = true;
+    while (off < b64.len() || first) {
+        var end = off + 4096;
+        if (end > b64.len()) {
+            end = b64.len();
+        }
+        let more = if (end < b64.len()) { "1" } else { "0" };
+        let ctl = if (first) { "a=T,f=100,m=" + more } else { "m=" + more };
+        out = out + esc() + "_G" + ctl + ";" + b64.substring(off, end) + esc() + "\\";
+        first = false;
+        off = end;
     }
     out
 }

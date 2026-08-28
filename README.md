@@ -35,14 +35,16 @@ underrun se convierte en **desfase permanente** (el segundo de retraso que
 tuvo este juego). Con el lazo cerrado, el adelanto escrito converge a
 ~130–220 ms medidos y se autocorrige.
 
-Con `std/inflate` en el lenguaje, rallyx trae ahora un **codec PNG puro en
-raylang** (`src/png.ray`: IDAT vía `zlib_inflate`, filtros 0–4, RGB/RGBA/
-paleta) y un **renderer de sprites** por half-blocks truecolor
-(`src/sprite.ray`: `▀` con fg = píxel superior y bg = inferior — 2 px por
-celda, la técnica de chafa/viu). El splash de arranque dibuja el coche desde
-`assets/car.png` — un PNG **generado por el propio encoder raylang**
-(`ray run tools/gen_assets.ray`: bloques DEFLATE stored + CRC-32 + Adler-32;
-`file` y `sips` lo aceptan).
+Imágenes con la superficie M143/M144: el decode es **`std/image`**
+(`decode_png` estricto — CRC por chunk, tipos 0/2/3/4/6, tRNS) y el dibujo
+elige la **mejor capacidad del terminal** (`term.capabilities()`): gráficos
+**kitty** de píxel real (el PNG entero por APC, `cell_px()` para encajar el
+texto al layout) o half-blocks truecolor (`▀` fg/bg — 2 px por celda,
+chafa/viu) como fallback universal. `src/png.ray` queda como **encoder**
+puro (stored + CRC-32/Adler-32): genera `assets/car.png`
+(`ray run tools/gen_assets.ray`, auto-verificado contra `std/image`) y
+alimenta los **tests diferenciales** — los vectores de filtros calculados a
+mano que validaron el decoder propio ahora fijan el de `std/image`.
 
 ## Las reglas
 
@@ -104,14 +106,14 @@ La disciplina de raygame (Tetris), con un reloj más y una cámara:
 | Rondas progresivas (más rojos, más rápidos), 3 vidas, high score | ✅ |
 | 30 fps con input sin bloqueo + diff mínimo con cámara clavada | ✅ |
 | Binario nativo (jugado bajo pty) | ✅ |
-| Codec PNG puro (decode 2/3/6 + filtros 0–4; encode stored+CRC) | ✅ |
-| Sprites half-block truecolor: splash con el coche + visor `--img` | ✅ |
+| PNG: decode vía `std/image` + encoder propio (stored+CRC) con tests diferenciales | ✅ |
+| Sprites: kitty graphics si el terminal puede (`capabilities`/`cell_px`), half-blocks si no | ✅ |
 | Música WSG reactiva en vivo (sirena/jingle/choque/game over) vía `stdin_pipe` | ✅ |
 | SFX: pshh de humo (ruido LFSR, roba la voz del arpegio) + drone de motor | ✅ |
 | v2: túneles laterales con wrap (coche, humo y BFS los cruzan) | ✅ |
 | v2: baches que arrastran el coche; persecución BFS con radio + fallback | ✅ |
 | v2: motor ligado al coche real (rueda / ralentí / petardeo sin gasolina) | ✅ |
-| Tests (reglas + volante + cámara + frame + codec PNG + sprites + sinte) | ✅ 28 |
+| Tests (reglas + volante + cámara + frame + PNG diferencial + sprites + sinte) | ✅ 31 |
 | Sprites en celda de juego (necesita ≥8×8 px/celda: no cabe en un term 80×24) | 📋 v3 |
 
 ## Hallazgos de dogfood

@@ -6,9 +6,9 @@ import std/fs;
 import std/time;
 import std/term;
 from std/term import Key;
+import std/image;
 import rally;
 import screen;
-import png;
 import sprite;
 import music;
 import wsg;
@@ -183,11 +183,19 @@ fn drain_keys(a: App) {
     }
 }
 
-// The arcade attract screen: the car sprite in truecolor half-blocks.
+// The arcade attract screen. Best capability first: the PNG itself over the
+// kitty graphics protocol when the terminal takes it (cell_px places the
+// caption under the pixels), truecolor half-blocks everywhere else.
 // Skipped silently when the asset is not around (running far from the
 // project root).
 fn splash() {
-    let img = match (png.load("assets/car.png")) {
+    let data = match (fs.read_file_bytes("assets/car.png")) {
+        Result.Ok(d) => d,
+        Result.Err(e) => {
+            return;
+        },
+    };
+    let img = match (image.decode_png(data)) {
         Result.Ok(im) => im,
         Result.Err(e) => {
             return;
@@ -195,13 +203,24 @@ fn splash() {
     };
     let e = screen.esc();
     var out = e + "[2J" + e + "[H";
-    let lines = sprite.render(img);
-    var i = 0;
-    while (i < lines.len()) {
-        out = out + e + "[" + to_string(3 + i) + ";10H" + lines[i];
-        i = i + 1;
+    let caps = term.capabilities();
+    var rows = 0;
+    if (caps.kitty_graphics) {
+        out = out + e + "[3;10H" + sprite.kitty_png(data);
+        rows = match (term.cell_px()) {
+            Option.Some(cell) => img.height / cell.1 + 1,
+            Option.None => img.height / 16 + 1,
+        };
+    } else {
+        let lines = sprite.render(img);
+        var i = 0;
+        while (i < lines.len()) {
+            out = out + e + "[" + to_string(3 + i) + ";10H" + lines[i];
+            i = i + 1;
+        }
+        rows = lines.len();
     }
-    out = out + e + "[" + to_string(5 + lines.len()) + ";10H" + "rallyx — pulsa una tecla";
+    out = out + e + "[" + to_string(5 + rows) + ";10H" + "rallyx — pulsa una tecla";
     write_now(out);
     io.read_timeout(64, 2500);
     write_now(e + "[2J");

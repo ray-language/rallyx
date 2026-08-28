@@ -1,11 +1,32 @@
-// The PNG codec and the half-block renderer: encode→decode round-trip,
-// every filter type against hand-computed pixels, palette images, and the
-// sprite line contract.
+// Differential tests: the pure-raylang ENCODER (png.ray) against std/image's
+// strict decoder — round-trip, every filter type against hand-computed
+// pixels, palette, CRC rejection — plus the sprite line contract and the
+// kitty APC chunking.
+import std/image;
+import std/term;
 import png;
 import sprite;
 
+fn decoded(w: int, h: int, pixels: [int]) -> image.Image {
+    let data = png.encode_rgba(png.Image { w: w, h: h, pixels: pixels });
+    match (image.decode_png(data)) {
+        Result.Ok(img) => img,
+        Result.Err(e) => {
+            eprint("decode failed: " + e);
+            exit(1)
+        },
+    }
+}
+
+fn assert_px(img: image.Image, i: int, r: int, g: int, b: int, a: int) {
+    assert_eq(img.pixels[i * 4], r);
+    assert_eq(img.pixels[i * 4 + 1], g);
+    assert_eq(img.pixels[i * 4 + 2], b);
+    assert_eq(img.pixels[i * 4 + 3], a);
+}
+
 @test
-fn rgba_roundtrip_survives_encode_and_decode() {
+fn our_encoder_round_trips_through_std_image() {
     let pixels = [
         png.rgba(255, 0, 0, 255),
         png.rgba(0, 255, 0, 255),
@@ -14,26 +35,17 @@ fn rgba_roundtrip_survives_encode_and_decode() {
         png.rgba(0, 0, 0, 0),
         png.rgba(200, 100, 50, 255)
     ];
-    let img = png.Image { w: 3, h: 2, pixels: pixels };
-    let data = png.encode_rgba(img);
-    // A real PNG: signature + readable back.
-    assert_eq(data.sub_bytes(0, 8), png.signature());
-    match (png.decode(data)) {
-        Result.Ok(back) => {
-            assert_eq(back.w, 3);
-            assert_eq(back.h, 2);
-            var i = 0;
-            while (i < 6) {
-                assert_eq(back.pixels[i], pixels[i]);
-                i = i + 1;
-            }
-        },
-        Result.Err(e) => assert(false),
-    }
+    let img = decoded(3, 2, pixels);
+    assert_eq(img.width, 3);
+    assert_eq(img.height, 2);
+    assert_px(img, 0, 255, 0, 0, 255);
+    assert_px(img, 3, 10, 20, 30, 128);
+    assert_px(img, 4, 0, 0, 0, 0);
+    assert_px(img, 5, 200, 100, 50, 255);
 }
 
 @test
-fn sub_and_up_filters_reconstruct_the_hand_computed_pixels() {
+fn std_image_reconstructs_sub_and_up_filters_to_the_hand_computed_pixels() {
     // 2×2 RGB: row 0 uses filter 1 (sub), row 1 uses filter 2 (up).
     let raw = [1, 10, 20, 30, 5, 5, 5, 2, 3, 4, 10, 5, 5, 15];
     let data = png.signature() + png.ihdr(
@@ -41,19 +53,19 @@ fn sub_and_up_filters_reconstruct_the_hand_computed_pixels() {
         2,
         2
     ) + png.chunk("IDAT", png.zlib_store(bytes_of(raw))) + png.chunk("IEND", b"");
-    match (png.decode(data)) {
+    match (image.decode_png(data)) {
         Result.Ok(img) => {
-            assert_eq(img.pixels[0], png.rgba(10, 20, 30, 255));
-            assert_eq(img.pixels[1], png.rgba(15, 25, 35, 255));
-            assert_eq(img.pixels[2], png.rgba(13, 24, 40, 255));
-            assert_eq(img.pixels[3], png.rgba(20, 30, 50, 255));
+            assert_px(img, 0, 10, 20, 30, 255);
+            assert_px(img, 1, 15, 25, 35, 255);
+            assert_px(img, 2, 13, 24, 40, 255);
+            assert_px(img, 3, 20, 30, 50, 255);
         },
         Result.Err(e) => assert(false),
     }
 }
 
 @test
-fn average_and_paeth_filters_reconstruct_the_hand_computed_pixels() {
+fn std_image_reconstructs_average_and_paeth_to_the_hand_computed_pixels() {
     // 2×2 RGB: row 0 uses filter 3 (average), row 1 uses filter 4 (paeth).
     let raw = [3, 10, 20, 30, 6, 11, 16, 4, 1, 2, 3, 5, 5, 5];
     let data = png.signature() + png.ihdr(
@@ -61,19 +73,19 @@ fn average_and_paeth_filters_reconstruct_the_hand_computed_pixels() {
         2,
         2
     ) + png.chunk("IDAT", png.zlib_store(bytes_of(raw))) + png.chunk("IEND", b"");
-    match (png.decode(data)) {
+    match (image.decode_png(data)) {
         Result.Ok(img) => {
-            assert_eq(img.pixels[0], png.rgba(10, 20, 30, 255));
-            assert_eq(img.pixels[1], png.rgba(11, 21, 31, 255));
-            assert_eq(img.pixels[2], png.rgba(11, 22, 33, 255));
-            assert_eq(img.pixels[3], png.rgba(16, 27, 38, 255));
+            assert_px(img, 0, 10, 20, 30, 255);
+            assert_px(img, 1, 11, 21, 31, 255);
+            assert_px(img, 2, 11, 22, 33, 255);
+            assert_px(img, 3, 16, 27, 38, 255);
         },
         Result.Err(e) => assert(false),
     }
 }
 
 @test
-fn palette_images_resolve_through_plte() {
+fn std_image_resolves_palettes_through_plte() {
     let plte = bytes_of([255, 0, 0, 0, 255, 0]);
     let raw = [0, 0, 1];
     let data = png.signature() + png.ihdr(
@@ -81,31 +93,45 @@ fn palette_images_resolve_through_plte() {
         1,
         3
     ) + png.chunk("PLTE", plte) + png.chunk("IDAT", png.zlib_store(bytes_of(raw))) + png.chunk("IEND", b"");
-    match (png.decode(data)) {
+    match (image.decode_png(data)) {
         Result.Ok(img) => {
-            assert_eq(img.w, 2);
-            assert_eq(img.pixels[0], png.rgba(255, 0, 0, 255));
-            assert_eq(img.pixels[1], png.rgba(0, 255, 0, 255));
+            assert_eq(img.width, 2);
+            assert_px(img, 0, 255, 0, 0, 255);
+            assert_px(img, 1, 0, 255, 0, 255);
         },
         Result.Err(e) => assert(false),
     }
 }
 
 @test
-fn bad_data_is_a_clean_error() {
-    match (png.decode(b"not a png at all")) {
+fn std_image_rejects_garbage_and_a_flipped_crc() {
+    match (image.decode_png(b"not a png at all")) {
         Result.Ok(img) => assert(false),
         Result.Err(e) => assert(e.len() > 0),
     }
-    // Palette index out of range must not panic.
-    let plte = bytes_of([255, 0, 0]);
-    let raw = [0, 7];
-    let data = png.signature() + png.ihdr(
-        1,
-        1,
-        3
-    ) + png.chunk("PLTE", plte) + png.chunk("IDAT", png.zlib_store(bytes_of(raw))) + png.chunk("IEND", b"");
-    match (png.decode(data)) {
+    // Corrupt one byte inside the IDAT payload: the per-chunk CRC (which
+    // our old decoder skipped and std/image verifies) must catch it.
+    let good = png.encode_rgba(
+        png.Image {
+            w: 2,
+            h: 2,
+            pixels: [
+                png.rgba(1, 2, 3, 255),
+                png.rgba(4, 5, 6, 255),
+                png.rgba(7, 8, 9, 255),
+                png.rgba(1, 1, 1, 255)
+            ]
+        }
+    );
+    var bad: [int] = [];
+    var i = 0;
+    while (i < good.len()) {
+        bad.push(good[i]);
+        i = i + 1;
+    }
+    let at = good.len() - 20;
+    bad[at] = bad[at] ^ 0xFF;
+    match (image.decode_png(bytes_of(bad))) {
         Result.Ok(img) => assert(false),
         Result.Err(e) => assert(e.len() > 0),
     }
@@ -114,39 +140,58 @@ fn bad_data_is_a_clean_error() {
 @test
 fn sprite_lines_pack_two_pixel_rows_per_cell() {
     // 2×2 fully opaque: one line, with both fg and bg truecolor codes.
-    let full = png.Image {
-        w: 2,
-        h: 2,
-        pixels: [
+    let full = decoded(
+        2,
+        2,
+        [
             png.rgba(255, 0, 0, 255),
             png.rgba(0, 255, 0, 255),
             png.rgba(0, 0, 255, 255),
             png.rgba(9, 9, 9, 255)
         ]
-    };
+    );
     let lines = sprite.render(full);
     assert_eq(lines.len(), 1);
     assert(lines[0].contains("[38;2;255;0;0m"));
     assert(lines[0].contains("[48;2;0;0;255m"));
     assert(lines[0].contains("▀"));
     // Transparent bottom: fg-only upper half block, no background code.
-    let top_only = png.Image { w: 1, h: 2, pixels: [png.rgba(1, 2, 3, 255), png.rgba(0, 0, 0, 0)] };
+    let top_only = decoded(1, 2, [png.rgba(1, 2, 3, 255), png.rgba(0, 0, 0, 0)]);
     let t = sprite.render(top_only);
     assert_eq(t.len(), 1);
     assert(t[0].contains("[38;2;1;2;3m"));
     assert(!t[0].contains("[48;2"));
     // Transparent top: lower half block.
-    let bottom_only = png.Image {
-        w: 1,
-        h: 2,
-        pixels: [png.rgba(0, 0, 0, 0), png.rgba(4, 5, 6, 255)]
-    };
+    let bottom_only = decoded(1, 2, [png.rgba(0, 0, 0, 0), png.rgba(4, 5, 6, 255)]);
     assert(sprite.render(bottom_only)[0].contains("▄"));
     // Odd height still renders its last row.
-    let odd = png.Image {
-        w: 1,
-        h: 3,
-        pixels: [png.rgba(1, 1, 1, 255), png.rgba(2, 2, 2, 255), png.rgba(3, 3, 3, 255)]
-    };
+    let odd = decoded(
+        1,
+        3,
+        [png.rgba(1, 1, 1, 255), png.rgba(2, 2, 2, 255), png.rgba(3, 3, 3, 255)]
+    );
     assert_eq(sprite.render(odd).len(), 2);
+}
+
+@test
+fn kitty_apc_is_chunked_and_terminated() {
+    let small = sprite.kitty_png(b"tiny");
+    assert(small.contains("_Ga=T,f=100,m=0;"));
+    // ~4000 raw bytes → >4096 base64 chars → two chunks: m=1 then m=0.
+    var big: [int] = [];
+    var i = 0;
+    while (i < 4000) {
+        big.push(i & 0xFF);
+        i = i + 1;
+    }
+    let apc = sprite.kitty_png(bytes_of(big));
+    assert(apc.contains("_Ga=T,f=100,m=1;"));
+    assert(apc.contains("_Gm=0;"));
+}
+
+@test
+fn da1_parser_reads_the_terminal_reply() {
+    assert_eq(term.parse_device_attributes(b"\x1b[?64;1;4c"), [64, 1, 4]);
+    var none: [int] = [];
+    assert_eq(term.parse_device_attributes(b"garbage"), none);
 }

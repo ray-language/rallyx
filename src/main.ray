@@ -1,22 +1,46 @@
 // rallyx — Rally-X in the terminal: grab the flags, smoke the chasers.
+import std/fs;
+import std/image;
 import std/random;
+import std/term;
 import app;
-import png;
 import sprite;
 
 fn show_img(path: string) -> int {
-    match (png.load(path)) {
-        Result.Ok(img) => {
-            for line in sprite.render(img) {
-                print(line);
-            }
-            0
-        },
+    let data = match (fs.read_file_bytes(path)) {
+        Result.Ok(d) => d,
         Result.Err(e) => {
             eprint("rallyx: " + path + ": " + e);
-            1
+            return 1;
         },
+    };
+    let img = match (image.decode_png(data)) {
+        Result.Ok(im) => im,
+        Result.Err(e) => {
+            eprint("rallyx: " + path + ": " + e);
+            return 1;
+        },
+    };
+    // Capability ladder, only when talking to a real terminal (the DA1
+    // query needs raw mode): kitty gets the PNG itself, everyone else the
+    // half-block rendering.
+    var kitty = false;
+    if (term.is_tty(0) && term.is_tty(1)) {
+        match (term.raw(fn() -> bool { term.capabilities().kitty_graphics })) {
+            Result.Ok(k) => {
+                kitty = k;
+            },
+            Result.Err(e) => { },
+        }
     }
+    if (kitty) {
+        print(sprite.kitty_png(data));
+    } else {
+        for line in sprite.render(img) {
+            print(line);
+        }
+    }
+    0
 }
 
 fn main() -> int {
@@ -41,7 +65,9 @@ fn main() -> int {
         if (a == "--help" || a == "-h") {
             eprint("usage: rallyx [--seed] [--no-music] [--img file.png]");
             eprint("  ↑↓←→ conducir · espacio humo · p pausa · r reiniciar · q salir");
-            eprint("  --img: dibuja un PNG en el terminal (half-blocks truecolor) y sale");
+            eprint(
+                "  --img: dibuja un PNG (kitty graphics si el terminal puede; half-blocks si no)"
+            );
             eprint("  --no-music: sin música (o si no hay ffplay, calla solo)");
             return 0;
         }
