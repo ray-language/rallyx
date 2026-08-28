@@ -1,0 +1,435 @@
+// rallyx — Rally-X rules, pure and clock-free: a maze of streets, a car that
+// never stops, flags worth more each pickup, red chasers, rocks, fuel, and a
+// smoke screen. The app layer owns the clocks; everything here is
+// deterministic given the RNG seed.
+import std/random;
+
+pub const W: int = 24;
+
+pub const H: int = 16;
+
+pub const UP: int = 0;
+
+pub const RIGHT: int = 1;
+
+pub const DOWN: int = 2;
+
+pub const LEFT: int = 3;
+
+pub const FUEL_MAX: int = 400;
+
+pub const SMOKE_COST: int = 25;
+
+pub const SMOKE_TICKS: int = 30;
+
+pub const STUN_TICKS: int = 8;
+
+pub const FLAG_COUNT: int = 10;
+
+pub const ROCK_COUNT: int = 4;
+
+pub const PLAYER_X: int = 12;
+
+pub const PLAYER_Y: int = 14;
+
+// '#' is wall, '.' is street. 24×16, closed border, Rally-X style blocks.
+fn maze_rows() -> [string] {
+    [
+        "########################",
+        "#......................#",
+        "#.##.##.####.####.##.#.#",
+        "#.##.##.####.####.##.#.#",
+        "#......................#",
+        "#.##.####.##.##.####.#.#",
+        "#.##.####.##.##.####.#.#",
+        "#........##..##........#",
+        "#.######.##..##.#####..#",
+        "#.######........#####..#",
+        "#......................#",
+        "#.##.####.####.####.##.#",
+        "#.##.####.####.####.##.#",
+        "#......................#",
+        "#......................#",
+        "########################"
+    ]
+}
+
+pub struct Car {
+    x: int,
+    y: int,
+    dir: int,
+    stun: int,
+}
+
+pub struct Game {
+    walls: [bool],
+    smoke: [int],
+    flags: [(int, int)],
+    rocks: [(int, int)],
+    special_x: int,
+    special_y: int,
+    player: Car,
+    enemies: [Car],
+    fuel: int,
+    score: int,
+    lives: int,
+    round: int,
+    flags_taken: int,
+    special_taken: bool,
+    over: bool,
+}
+
+fn dir_dx(d: int) -> int {
+    if (d == RIGHT) { 1 } else if (d == LEFT) { 0 - 1 } else { 0 }
+}
+
+fn dir_dy(d: int) -> int {
+    if (d == DOWN) { 1 } else if (d == UP) { 0 - 1 } else { 0 }
+}
+
+fn iabs(n: int) -> int {
+    if (n < 0) { 0 - n } else { n }
+}
+
+pub fn wall_at(g: Game, x: int, y: int) -> bool {
+    if (x < 0 || x >= W || y < 0 || y >= H) {
+        return true;
+    }
+    g.walls[y * W + x]
+}
+
+pub fn rock_at(g: Game, x: int, y: int) -> bool {
+    for (rx, ry) in g.rocks.iter() {
+        if (rx == x && ry == y) {
+            return true;
+        }
+    }
+    false
+}
+
+fn enemy_at(g: Game, x: int, y: int) -> bool {
+    for e in g.enemies {
+        if (e.x == x && e.y == y) {
+            return true;
+        }
+    }
+    false
+}
+
+fn enemy_spawn(i: int) -> Car {
+    let xs = [1, W - 2, W - 2, 1];
+    let ys = [1, 1, H - 3, H - 3];
+    Car { x: xs[i % 4], y: ys[i % 4], dir: DOWN, stun: STUN_TICKS }
+}
+
+fn reset_positions(g: Game) {
+    g.player = Car { x: PLAYER_X, y: PLAYER_Y, dir: RIGHT, stun: 0 };
+    var es: [Car] = [];
+    var i = 0;
+    while (i < g.enemies.len()) {
+        es.push(enemy_spawn(i));
+        i = i + 1;
+    }
+    g.enemies = es;
+}
+
+fn clear_smoke(g: Game) {
+    var i = 0;
+    while (i < g.smoke.len()) {
+        g.smoke[i] = 0;
+        i = i + 1;
+    }
+}
+
+fn decay_smoke(g: Game) {
+    var i = 0;
+    while (i < g.smoke.len()) {
+        if (g.smoke[i] > 0) {
+            g.smoke[i] = g.smoke[i] - 1;
+        }
+        i = i + 1;
+    }
+}
+
+fn remove_at(xs: [(int, int)], at: int) -> [(int, int)] {
+    var out: [(int, int)] = [];
+    var i = 0;
+    while (i < xs.len()) {
+        if (i != at) {
+            out.push(xs[i]);
+        }
+        i = i + 1;
+    }
+    out
+}
+
+// Street cells where flags and rocks may land: not a wall, not a spawn
+// corner, not next to the player's spawn.
+fn placement_cells(g: Game) -> [(int, int)] {
+    var out: [(int, int)] = [];
+    var y = 0;
+    while (y < H) {
+        var x = 0;
+        while (x < W) {
+            var ok = !g.walls[y * W + x];
+            if (iabs(x - PLAYER_X) + iabs(y - PLAYER_Y) <= 3) {
+                ok = false;
+            }
+            var i = 0;
+            while (i < 4) {
+                let s = enemy_spawn(i);
+                if (s.x == x && s.y == y) {
+                    ok = false;
+                }
+                i = i + 1;
+            }
+            if (ok) {
+                out.push((x, y));
+            }
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+    out
+}
+
+fn setup_round(g: Game) {
+    g.fuel = FUEL_MAX;
+    g.flags_taken = 0;
+    g.special_taken = false;
+    clear_smoke(g);
+    var n = 1 + g.round;
+    if (n > 4) {
+        n = 4;
+    }
+    var es: [Car] = [];
+    var i = 0;
+    while (i < n) {
+        es.push(enemy_spawn(i));
+        i = i + 1;
+    }
+    g.enemies = es;
+    g.player = Car { x: PLAYER_X, y: PLAYER_Y, dir: RIGHT, stun: 0 };
+    var free = placement_cells(g);
+    var flags: [(int, int)] = [];
+    i = 0;
+    while (i < FLAG_COUNT && free.len() > 0) {
+        let j = random.below(free.len());
+        flags.push(free[j]);
+        free = remove_at(free, j);
+        i = i + 1;
+    }
+    g.flags = flags;
+    let sp = flags[random.below(flags.len())];
+    g.special_x = sp.0;
+    g.special_y = sp.1;
+    var rocks: [(int, int)] = [];
+    i = 0;
+    while (i < ROCK_COUNT && free.len() > 0) {
+        let j = random.below(free.len());
+        rocks.push(free[j]);
+        free = remove_at(free, j);
+        i = i + 1;
+    }
+    g.rocks = rocks;
+}
+
+pub fn new_game() -> Game {
+    var walls: [bool] = [];
+    for r in maze_rows() {
+        for c in r.chars() {
+            walls.push(c == '#');
+        }
+    }
+    var smoke: [int] = [];
+    var i = 0;
+    while (i < W * H) {
+        smoke.push(0);
+        i = i + 1;
+    }
+    var no_flags: [(int, int)] = [];
+    var no_rocks: [(int, int)] = [];
+    var no_enemies: [Car] = [];
+    let g = Game {
+        walls: walls,
+        smoke: smoke,
+        flags: no_flags,
+        rocks: no_rocks,
+        special_x: 0,
+        special_y: 0,
+        player: Car { x: PLAYER_X, y: PLAYER_Y, dir: RIGHT, stun: 0 },
+        enemies: no_enemies,
+        fuel: FUEL_MAX,
+        score: 0,
+        lives: 3,
+        round: 1,
+        flags_taken: 0,
+        special_taken: false,
+        over: false
+    };
+    setup_round(g);
+    g
+}
+
+pub fn turn(g: Game, d: int) {
+    if (!g.over) {
+        g.player.dir = d;
+    }
+}
+
+fn crash(g: Game) {
+    g.lives = g.lives - 1;
+    if (g.lives <= 0) {
+        g.lives = 0;
+        g.over = true;
+        return;
+    }
+    clear_smoke(g);
+    reset_positions(g);
+}
+
+fn pick_flag(g: Game) {
+    var kept: [(int, int)] = [];
+    var got = false;
+    for (fx, fy) in g.flags.iter() {
+        if (fx == g.player.x && fy == g.player.y) {
+            got = true;
+        } else {
+            kept.push((fx, fy));
+        }
+    }
+    if (!got) {
+        return;
+    }
+    g.flags = kept;
+    g.flags_taken = g.flags_taken + 1;
+    var points = 100 * g.flags_taken;
+    if (g.special_taken) {
+        points = points * 2;
+    }
+    g.score = g.score + points;
+    if (g.player.x == g.special_x && g.player.y == g.special_y) {
+        g.special_taken = true;
+    }
+    if (g.flags.len() == 0) {
+        // Round complete: the remaining fuel is the bonus, then a fresh maze
+        // fill with one more chaser.
+        g.score = g.score + g.fuel;
+        g.round = g.round + 1;
+        setup_round(g);
+    }
+}
+
+// One player tick: the car always tries to advance in its heading. A wall
+// stops it (idling burns fuel too); a rock is a crash.
+pub fn step_player(g: Game) {
+    if (g.over) {
+        return;
+    }
+    decay_smoke(g);
+    if (g.fuel > 0) {
+        g.fuel = g.fuel - 1;
+    }
+    let nx = g.player.x + dir_dx(g.player.dir);
+    let ny = g.player.y + dir_dy(g.player.dir);
+    if (wall_at(g, nx, ny)) {
+        return;
+    }
+    if (rock_at(g, nx, ny)) {
+        crash(g);
+        return;
+    }
+    g.player.x = nx;
+    g.player.y = ny;
+    if (enemy_at(g, nx, ny)) {
+        crash(g);
+        return;
+    }
+    pick_flag(g);
+}
+
+// Greedy chase: never reverse unless boxed in, prefer the passable dir that
+// closes the Manhattan distance, keep the current heading on ties.
+fn chase_dir(g: Game, e: Car) -> int {
+    let reverse = (e.dir + 2) % 4;
+    var best = reverse;
+    var best_score = 999999;
+    var d = 0;
+    while (d < 4) {
+        if (d != reverse) {
+            let nx = e.x + dir_dx(d);
+            let ny = e.y + dir_dy(d);
+            if (!wall_at(g, nx, ny) && !rock_at(g, nx, ny)) {
+                var sc = (iabs(nx - g.player.x) + iabs(ny - g.player.y)) * 2;
+                if (d == e.dir) {
+                    sc = sc - 1;
+                }
+                if (sc < best_score) {
+                    best_score = sc;
+                    best = d;
+                }
+            }
+        }
+        d = d + 1;
+    }
+    best
+}
+
+// One chaser tick: stunned cars sit it out; driving into smoke consumes the
+// cloud and stuns; reaching the player is a crash.
+pub fn step_enemies(g: Game) {
+    if (g.over) {
+        return;
+    }
+    var i = 0;
+    while (i < g.enemies.len()) {
+        let e = g.enemies[i];
+        if (e.stun > 0) {
+            e.stun = e.stun - 1;
+        } else {
+            let d = chase_dir(g, e);
+            e.dir = d;
+            let nx = e.x + dir_dx(d);
+            let ny = e.y + dir_dy(d);
+            if (!wall_at(g, nx, ny) && !rock_at(g, nx, ny)) {
+                e.x = nx;
+                e.y = ny;
+                if (g.smoke[ny * W + nx] > 0) {
+                    g.smoke[ny * W + nx] = 0;
+                    e.stun = STUN_TICKS;
+                }
+                if (nx == g.player.x && ny == g.player.y) {
+                    crash(g);
+                    return;
+                }
+            }
+        }
+        i = i + 1;
+    }
+}
+
+// Lay smoke on the cell just behind the car. Costs fuel; needs a street cell.
+pub fn drop_smoke(g: Game) {
+    if (g.over || g.fuel < SMOKE_COST) {
+        return;
+    }
+    let bx = g.player.x - dir_dx(g.player.dir);
+    let by = g.player.y - dir_dy(g.player.dir);
+    if (wall_at(g, bx, by)) {
+        return;
+    }
+    g.smoke[by * W + bx] = SMOKE_TICKS;
+    g.fuel = g.fuel - SMOKE_COST;
+}
+
+// ms between player ticks: an empty tank halves the speed (the Rally-X
+// limp-home, not an instant death).
+pub fn player_ms(g: Game) -> int {
+    if (g.fuel > 0) { 90 } else { 180 }
+}
+
+// ms between chaser ticks: each round they close in a little faster.
+pub fn enemy_ms(g: Game) -> int {
+    let ms = 115 - (g.round - 1) * 5;
+    if (ms < 85) { 85 } else { ms }
+}

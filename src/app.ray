@@ -1,0 +1,202 @@
+// rallyx — the 30 fps loop with THREE clocks: the frame (repaint on change),
+// the player car, and the chasers (each round a bit faster). Input is the
+// single wait: io.read_timeout until the next frame deadline.
+import std/io;
+import std/fs;
+import std/time;
+import std/term;
+from std/term import Key;
+import rally;
+import screen;
+
+const FRAME_MS: int = 33;
+
+fn write_now(s: string) {
+    io.write(s);
+    io.flush();
+}
+
+fn hiscore_path() -> string {
+    match (env("HOME")) {
+        Option.Some(h) => h + "/.rallyx_hiscore",
+        Option.None => "/tmp/.rallyx_hiscore",
+    }
+}
+
+fn load_hiscore() -> int {
+    match (fs.read_file(hiscore_path())) {
+        Result.Ok(s) => {
+            match (parse_int(s.trim())) {
+                Option.Some(n) => n,
+                Option.None => 0,
+            }
+        },
+        Result.Err(e) => 0,
+    }
+}
+
+fn save_hiscore(n: int) {
+    fs.write_file(hiscore_path(), to_string(n));
+}
+
+struct App {
+    g: rally.Game,
+    prev: [string],
+    pending: bytes,
+    hiscore: int,
+    paused: bool,
+    quit: bool,
+}
+
+fn repaint(a: App) {
+    let next = screen.frame(a.g, a.hiscore);
+    let ops = screen.paint_diff(a.prev, next);
+    if (ops != "") {
+        write_now(ops);
+    }
+    a.prev = next;
+}
+
+fn note_score(a: App) {
+    if (a.g.score > a.hiscore) {
+        a.hiscore = a.g.score;
+        save_hiscore(a.hiscore);
+    }
+}
+
+fn on_key(a: App, k: Key) {
+    match (k) {
+        Key.Char(c) => {
+            if (c == 'q') {
+                a.quit = true;
+            } else if (c == 'p') {
+                a.paused = !a.paused;
+            } else if (c == ' ') {
+                if (!a.paused) {
+                    rally.drop_smoke(a.g);
+                }
+            } else if (c == 'r') {
+                if (a.g.over) {
+                    a.g = rally.new_game();
+                }
+            }
+        },
+        Key.Ctrl(c) => {
+            if (c == 'c') {
+                a.quit = true;
+            }
+        },
+        Key.Up => {
+            if (!a.paused) {
+                rally.turn(a.g, rally.UP);
+            }
+        },
+        Key.Down => {
+            if (!a.paused) {
+                rally.turn(a.g, rally.DOWN);
+            }
+        },
+        Key.Left => {
+            if (!a.paused) {
+                rally.turn(a.g, rally.LEFT);
+            }
+        },
+        Key.Right => {
+            if (!a.paused) {
+                rally.turn(a.g, rally.RIGHT);
+            }
+        },
+        _ => { },
+    }
+}
+
+fn drain_keys(a: App) {
+    var more = true;
+    while (more && a.pending.len() > 0 && !a.quit) {
+        match (term.decode(a.pending)) {
+            Option.Some(decoded) => {
+                a.pending = a.pending.sub_bytes(decoded.1, a.pending.len());
+                on_key(a, decoded.0);
+            },
+            Option.None => {
+                more = false;
+                if (a.pending == b"\x1b") {
+                    a.pending = b"";
+                }
+            },
+        }
+    }
+}
+
+fn event_loop() -> int {
+    var empty: [string] = [];
+    let a = App {
+        g: rally.new_game(),
+        prev: empty,
+        pending: b"",
+        hiscore: load_hiscore(),
+        paused: false,
+        quit: false
+    };
+    let e = screen.esc();
+    write_now(e + "[?1049h" + e + "[?25l" + e + "[2J" + e + "[H");
+    repaint(a);
+    var next_frame = time.monotonic() + FRAME_MS;
+    var next_player = time.monotonic() + rally.player_ms(a.g);
+    var next_enemy = time.monotonic() + rally.enemy_ms(a.g);
+    while (!a.quit) {
+        let now = time.monotonic();
+        if (!a.paused && !a.g.over) {
+            if (now >= next_player) {
+                rally.step_player(a.g);
+                next_player = now + rally.player_ms(a.g);
+                note_score(a);
+            }
+            if (now >= next_enemy) {
+                rally.step_enemies(a.g);
+                next_enemy = now + rally.enemy_ms(a.g);
+                note_score(a);
+            }
+        }
+        var wait = next_frame - time.monotonic();
+        if (wait < 1) {
+            wait = 1;
+        }
+        match (io.read_timeout(64, wait)) {
+            io.ReadResult.Data(chunk) => {
+                a.pending = a.pending + chunk;
+                drain_keys(a);
+            },
+            io.ReadResult.TimedOut => { },
+            io.ReadResult.Eof => {
+                a.quit = true;
+            },
+        }
+        if (time.monotonic() >= next_frame) {
+            repaint(a);
+            next_frame = next_frame + FRAME_MS;
+            if (next_frame < time.monotonic()) {
+                next_frame = time.monotonic() + FRAME_MS;
+            }
+        }
+    }
+    write_now(e + "[?1049l" + e + "[?25h");
+    print(
+        "score " + to_string(a.g.score) + " · round " + to_string(a.g.round) + " · hi " + to_string(a.hiscore)
+    );
+    0
+}
+
+pub fn play() -> int {
+    if (!term.is_tty(0) || !term.is_tty(1)) {
+        eprint("rallyx: needs a terminal");
+        return 1;
+    }
+    match (term.raw(fn() -> int { event_loop() })) {
+        Result.Ok(code) => code,
+        Result.Err(e) => {
+            eprint("rallyx: " + e);
+            1
+        },
+    }
+}

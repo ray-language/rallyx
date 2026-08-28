@@ -1,0 +1,114 @@
+// rallyx — frame builder + line-diff painter (raygame's discipline): a frame
+// is fixed lines, a repaint is absolute-move + overwrite of changed lines.
+import rally;
+
+pub fn esc() -> string {
+    "\u{1B}"
+}
+
+fn paint(code: int, s: string) -> string {
+    esc() + "[" + to_string(code) + "m" + s + esc() + "[0m"
+}
+
+fn cell_str(g: rally.Game, x: int, y: int) -> string {
+    if (g.player.x == x && g.player.y == y && !g.over) {
+        return paint(96, "▓▓");
+    }
+    for e in g.enemies {
+        if (e.x == x && e.y == y) {
+            // Stunned chasers dim to magenta so the smoke hit reads.
+            return if (e.stun > 0) { paint(35, "▒▒") } else { paint(91, "▓▓") };
+        }
+    }
+    if (g.smoke[y * rally.W + x] > 0) {
+        return paint(90, "░░");
+    }
+    for (fx, fy) in g.flags.iter() {
+        if (fx == x && fy == y) {
+            if (x == g.special_x && y == g.special_y) {
+                return paint(95, "S ");
+            }
+            return paint(93, "F ");
+        }
+    }
+    if (rally.rock_at(g, x, y)) {
+        return paint(37, "██");
+    }
+    if (g.walls[y * rally.W + x]) {
+        return paint(34, "██");
+    }
+    "  "
+}
+
+fn fuel_bar(g: rally.Game) -> string {
+    let filled = g.fuel * 10 / rally.FUEL_MAX;
+    var bar = "";
+    var i = 0;
+    while (i < 10) {
+        bar = bar + if (i < filled) { "█" } else { "·" };
+        i = i + 1;
+    }
+    let code = if (filled <= 2) { 91 } else { 92 };
+    paint(code, bar)
+}
+
+fn lives_str(g: rally.Game) -> string {
+    var s = "";
+    var i = 0;
+    while (i < g.lives) {
+        s = s + "♥";
+        i = i + 1;
+    }
+    paint(91, s)
+}
+
+pub fn frame(g: rally.Game, hiscore: int) -> [string] {
+    var out: [string] = [];
+    out.push("  rallyx");
+    var y = 0;
+    while (y < rally.H) {
+        var row = "  ";
+        var x = 0;
+        while (x < rally.W) {
+            row = row + cell_str(g, x, y);
+            x = x + 1;
+        }
+        if (y == 1) {
+            row = row + "   score  " + to_string(g.score);
+        } else if (y == 2) {
+            row = row + "   hi     " + to_string(hiscore);
+        } else if (y == 3) {
+            row = row + "   fuel   " + fuel_bar(g);
+        } else if (y == 4) {
+            row = row + "   lives  " + lives_str(g);
+        } else if (y == 5) {
+            row = row + "   round  " + to_string(g.round);
+        } else if (y == 7) {
+            row = row + "   flags  " + to_string(g.flags.len()) + " left";
+        } else if (y == 10) {
+            row = row + "   ↑↓←→ conducir";
+        } else if (y == 11) {
+            row = row + "   espacio humo";
+        } else if (y == 12) {
+            row = row + "   p pausa · q salir";
+        } else if (y == 14 && g.over) {
+            row = row + "   " + esc() + "[7m GAME OVER — r reinicia " + esc() + "[0m";
+        }
+        out.push(row);
+        y = y + 1;
+    }
+    out
+}
+
+pub fn paint_diff(prev: [string], next: [string]) -> string {
+    var out = "";
+    var i = 0;
+    while (i < next.len()) {
+        let same = i < prev.len() && prev[i] == next[i];
+        if (!same) {
+            out = out + esc() + "[" + to_string(i + 1) + ";1H" + esc() + "[2K" + next[i];
+        }
+        i = i + 1;
+    }
+    out
+}

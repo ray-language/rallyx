@@ -1,0 +1,199 @@
+// The rules, clock-free and seeded: maze shape, driving, flags and scoring,
+// smoke, chasers, crashes, fuel, and the frame contract.
+import std/random;
+import rally;
+import screen;
+
+fn fresh() -> rally.Game {
+    random.seed(7);
+    rally.new_game()
+}
+
+// A game with no chasers and no rocks: a clean track for movement tests.
+fn bare() -> rally.Game {
+    let g = fresh();
+    var no_enemies: [rally.Car] = [];
+    var no_rocks: [(int, int)] = [];
+    g.enemies = no_enemies;
+    g.rocks = no_rocks;
+    g
+}
+
+@test
+fn maze_is_well_formed_and_round_is_populated() {
+    let g = fresh();
+    assert_eq(g.walls.len(), rally.W * rally.H);
+    var x = 0;
+    while (x < rally.W) {
+        assert(rally.wall_at(g, x, 0));
+        assert(rally.wall_at(g, x, rally.H - 1));
+        x = x + 1;
+    }
+    var y = 0;
+    while (y < rally.H) {
+        assert(rally.wall_at(g, 0, y));
+        assert(rally.wall_at(g, rally.W - 1, y));
+        y = y + 1;
+    }
+    assert(!rally.wall_at(g, rally.PLAYER_X, rally.PLAYER_Y));
+    assert_eq(g.flags.len(), rally.FLAG_COUNT);
+    assert_eq(g.rocks.len(), rally.ROCK_COUNT);
+    // Flags sit on streets, and the special flag is one of them.
+    var special_found = false;
+    for (fx, fy) in g.flags.iter() {
+        assert(!rally.wall_at(g, fx, fy));
+        if (fx == g.special_x && fy == g.special_y) {
+            special_found = true;
+        }
+    }
+    assert(special_found);
+    assert_eq(g.lives, 3);
+    assert_eq(g.fuel, rally.FUEL_MAX);
+    assert_eq(g.enemies.len(), 2);
+}
+
+@test
+fn car_advances_on_its_heading_and_walls_stop_it() {
+    let g = bare();
+    g.player.x = 1;
+    g.player.y = 1;
+    rally.turn(g, rally.LEFT);
+    let fuel_before = g.fuel;
+    rally.step_player(g);
+    // Wall at x=0: the car idles but still burns fuel.
+    assert_eq(g.player.x, 1);
+    assert_eq(g.player.y, 1);
+    assert_eq(g.fuel, fuel_before - 1);
+    rally.turn(g, rally.RIGHT);
+    rally.step_player(g);
+    assert_eq(g.player.x, 2);
+    assert_eq(g.player.y, 1);
+}
+
+@test
+fn flags_score_sequentially_special_doubles_and_round_advances() {
+    let g = bare();
+    g.flags = [(3, 1), (4, 1)];
+    g.special_x = 3;
+    g.special_y = 1;
+    g.player.x = 2;
+    g.player.y = 1;
+    rally.turn(g, rally.RIGHT);
+    rally.step_player(g);
+    // First flag is the special: 100 points, doubling armed.
+    assert_eq(g.score, 100);
+    assert(g.special_taken);
+    assert_eq(g.flags.len(), 1);
+    let fuel_mid = g.fuel;
+    rally.step_player(g);
+    // Second flag doubled (2 × 200) + the fuel bonus, and the round turns.
+    assert_eq(g.score, 100 + 400 + fuel_mid - 1);
+    assert_eq(g.round, 2);
+    assert_eq(g.flags.len(), rally.FLAG_COUNT);
+    assert_eq(g.fuel, rally.FUEL_MAX);
+    assert_eq(g.enemies.len(), 3);
+}
+
+@test
+fn smoke_costs_fuel_and_stuns_the_chaser_that_drives_in() {
+    let g = bare();
+    g.player.x = 3;
+    g.player.y = 1;
+    rally.turn(g, rally.RIGHT);
+    let fuel_before = g.fuel;
+    rally.drop_smoke(g);
+    // The cloud lands behind the car.
+    assert(g.smoke[1 * rally.W + 2] > 0);
+    assert_eq(g.fuel, fuel_before - rally.SMOKE_COST);
+    g.enemies = [rally.Car { x: 1, y: 1, dir: rally.RIGHT, stun: 0 }];
+    rally.step_enemies(g);
+    // The chaser closed in, hit the cloud, and is stunned; the cloud is spent.
+    let e = g.enemies[0];
+    assert_eq(e.x, 2);
+    assert_eq(e.y, 1);
+    assert_eq(e.stun, rally.STUN_TICKS);
+    assert_eq(g.smoke[1 * rally.W + 2], 0);
+    rally.step_enemies(g);
+    // Stunned: it sits still and the stun ticks down.
+    assert_eq(g.enemies[0].x, 2);
+    assert_eq(g.enemies[0].stun, rally.STUN_TICKS - 1);
+}
+
+@test
+fn getting_caught_costs_a_life_and_resets_positions() {
+    let g = bare();
+    g.enemies = [rally.Car { x: 4, y: 1, dir: rally.LEFT, stun: 0 }];
+    g.player.x = 3;
+    g.player.y = 1;
+    rally.step_enemies(g);
+    assert_eq(g.lives, 2);
+    assert(!g.over);
+    // Both cars are back at their spawns, the chaser with grace stun.
+    assert_eq(g.player.x, rally.PLAYER_X);
+    assert_eq(g.player.y, rally.PLAYER_Y);
+    assert_eq(g.enemies[0].x, 1);
+    assert_eq(g.enemies[0].y, 1);
+    assert(g.enemies[0].stun > 0);
+}
+
+@test
+fn rocks_crash_the_car_and_three_crashes_end_the_game() {
+    let g = bare();
+    g.rocks = [(2, 1)];
+    var crashes = 0;
+    while (crashes < 3) {
+        g.player.x = 1;
+        g.player.y = 1;
+        rally.turn(g, rally.RIGHT);
+        rally.step_player(g);
+        crashes = crashes + 1;
+        assert_eq(g.lives, 3 - crashes);
+    }
+    assert(g.over);
+    // Over: ticks and turns are no-ops.
+    let fuel_before = g.fuel;
+    rally.step_player(g);
+    assert_eq(g.fuel, fuel_before);
+    rally.turn(g, rally.UP);
+    assert_eq(g.player.dir, rally.RIGHT);
+}
+
+@test
+fn empty_tank_slows_the_car_and_blocks_smoke() {
+    let g = bare();
+    assert_eq(rally.player_ms(g), 90);
+    g.fuel = 0;
+    assert_eq(rally.player_ms(g), 180);
+    g.fuel = rally.SMOKE_COST - 1;
+    g.player.x = 3;
+    g.player.y = 1;
+    rally.turn(g, rally.RIGHT);
+    rally.drop_smoke(g);
+    assert_eq(g.smoke[1 * rally.W + 2], 0);
+    assert_eq(g.fuel, rally.SMOKE_COST - 1);
+}
+
+@test
+fn frame_is_stable_shape_and_diff_is_minimal() {
+    let g = bare();
+    g.flags = [(1, 1)];
+    g.player.x = 2;
+    g.player.y = 13;
+    rally.turn(g, rally.RIGHT);
+    let f1 = screen.frame(g, 0);
+    assert_eq(f1.len(), rally.H + 1);
+    rally.step_player(g);
+    let f2 = screen.frame(g, 0);
+    var changed = 0;
+    var i = 0;
+    while (i < f2.len()) {
+        if (f1[i] != f2[i]) {
+            changed = changed + 1;
+        }
+        i = i + 1;
+    }
+    // A one-cell move repaints its row, plus at most the fuel/score panel rows.
+    assert(changed >= 1);
+    assert(changed <= 3);
+    assert_eq(screen.paint_diff(f2, f2), "");
+}
