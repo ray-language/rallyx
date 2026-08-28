@@ -42,9 +42,8 @@ reloj de ffplay.
 Imágenes con la superficie M143/M144: el decode es **`std/image`**
 (`decode_png` estricto — CRC por chunk, tipos 0/2/3/4/6, tRNS) y el dibujo
 elige la **mejor capacidad del terminal** (`term.capabilities()`): gráficos
-**kitty** de píxel real (el PNG por APC, escalado con `c=`/`r=` al mismo
-footprint que los half-blocks para que se vea nítido en vez de a tamaño
-nativo diminuto) o half-blocks truecolor (`▀` fg/bg — 2 px por celda,
+**kitty** de píxel real (el PNG por APC, a tamaño **nativo** 1:1 — pequeño y
+nítido, sin el estirado que pixela) o half-blocks truecolor (`▀` fg/bg — 2 px por celda,
 chafa/viu) como fallback universal. La portada es una **escena hero**
 generada por píxel en `tools/gen_assets.ray`: coche lateral con degradado
 carrocería→sombra, tapacubos metálicos, faros, sombra al suelo y una
@@ -116,13 +115,13 @@ La disciplina de raygame (Tetris), con un reloj más y una cámara:
 | 30 fps con input sin bloqueo + diff mínimo con cámara clavada | ✅ |
 | Binario nativo (jugado bajo pty) | ✅ |
 | PNG: decode vía `std/image` + encoder propio (stored+CRC) con tests diferenciales | ✅ |
-| Sprites: escena hero de portada (kitty escalado `c=`/`r=` o half-blocks) | ✅ |
+| Sprites: escena hero de portada (kitty nativo 1:1 o half-blocks) | ✅ |
 | Música WSG reactiva en vivo (sirena/jingle/choque/game over) vía `std/audio` | ✅ |
 | SFX: pshh de humo (ruido LFSR, roba la voz del arpegio) + drone de motor | ✅ |
 | v2: túneles laterales con wrap (coche, humo y BFS los cruzan) | ✅ |
 | v2: baches que arrastran el coche; persecución BFS con radio + fallback | ✅ |
 | v2: motor ligado al coche real (rueda / ralentí / petardeo sin gasolina) | ✅ |
-| Tests (reglas + volante + cámara + frame + PNG diferencial + sprites + sinte) | ✅ 31 |
+| Tests (reglas + volante + cámara + frame + PNG diferencial + sprites + sinte) | ✅ 30 |
 | Sprites en celda de juego (necesita ≥8×8 px/celda: no cabe en un term 80×24) | 📋 v3 |
 
 ## Hallazgos de dogfood

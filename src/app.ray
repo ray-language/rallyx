@@ -208,12 +208,18 @@ fn splash(caps: term.Capabilities) {
     };
     let e = screen.esc();
     var out = e + "[2J" + e + "[H";
-    // The half-block rendering is exactly height/2 cell rows; scale the kitty
-    // image into that same cols×rows box so both paths take the same footprint
-    // (col 3 keeps the 72-wide scene inside an 80-column terminal).
-    let rows = (img.height + 1) / 2;
+    // kitty draws the PNG at its NATIVE pixel size (no c=/r= upscaling): small
+    // and 1:1 crisp instead of stretched-and-blocky. cell_px tells us how many
+    // cell rows that occupies so the caption clears it. Half-blocks are the
+    // universal fallback at height/2 rows. Col 3 keeps it inside 80 columns.
+    var caprow = 3 + (img.height + 1) / 2;
     if (caps.kitty_graphics) {
-        out = out + e + "[2;3H" + sprite.kitty_png_box(data, img.width, rows);
+        out = out + e + "[2;3H" + sprite.kitty_png(data);
+        let krows = match (term.cell_px()) {
+            Option.Some(cell) => img.height / cell.1 + 1,
+            Option.None => img.height / 16 + 1,
+        };
+        caprow = 3 + krows;
     } else {
         let lines = sprite.render(img);
         var i = 0;
@@ -222,7 +228,7 @@ fn splash(caps: term.Capabilities) {
             i = i + 1;
         }
     }
-    out = out + e + "[" + to_string(3 + rows) + ";3H" + "rallyx — el auto que tira humo · pulsa una tecla";
+    out = out + e + "[" + to_string(caprow) + ";3H" + "rallyx — el auto que tira humo · pulsa una tecla";
     write_now(out);
     io.read_timeout(64, 2500);
     write_now(e + "[2J");

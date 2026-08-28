@@ -65,14 +65,6 @@ pub fn kitty_png(data: bytes) -> string {
     chunked(data, "a=T,f=100")
 }
 
-// Same delivery, but the terminal scales the image into a cols×rows cell box
-// (kitty c=/r=). We size that box to match the half-block footprint so both
-// rendering paths occupy the same space and a pixel-art asset scales up
-// crisply (nearest-neighbour) instead of showing at its tiny native size.
-pub fn kitty_png_box(data: bytes, cols: int, rows: int) -> string {
-    chunked(data, "a=T,f=100,c=" + to_string(cols) + ",r=" + to_string(rows))
-}
-
 fn chunked(data: bytes, head: string) -> string {
     let b64 = base64.base64(data);
     var out = "";
