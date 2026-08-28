@@ -28,7 +28,7 @@ fn show_img(path: string) -> int {
     // it inside another raw session.
     var kitty = false;
     if (term.is_tty(0) && term.is_tty(1)) {
-        kitty = term.capabilities().kitty_graphics;
+        kitty = sprite.use_kitty(term.capabilities().kitty_graphics);
     }
     if (kitty) {
         // Pin a small display box (kitty c=/r=) so the art stays compact

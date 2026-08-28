@@ -45,7 +45,11 @@ elige la **mejor capacidad del terminal** (`term.capabilities()`): gráficos
 **kitty** de píxel real (el PNG por APC, con el tamaño en pantalla fijado a
 un box `c=`/`r=` chico para que no se agrande y no se vea pixelado) o
 half-blocks truecolor (`▀` fg/bg — 2 px por celda,
-chafa/viu) como fallback universal. La portada es una **escena hero**
+chafa/viu) como fallback universal. La detección de `capabilities()` sólo
+mira `TERM`/`KITTY_WINDOW_ID`, así que **Ghostty** (y otras terminales
+kitty-capaces) se le escapan; rallyx la ensancha por entorno
+(`TERM=*ghostty*`, `GHOSTTY_*`) y deja el override `RALLYX_KITTY=1/0`. La
+portada es una **escena hero**
 generada por píxel en `tools/gen_assets.ray`: coche lateral con degradado
 carrocería→sombra, tapacubos metálicos, faros, sombra al suelo y una
 **estela de humo** ascendente, todo dibujado por capas con borde de 1 px.
