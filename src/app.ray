@@ -208,23 +208,21 @@ fn splash(caps: term.Capabilities) {
     };
     let e = screen.esc();
     var out = e + "[2J" + e + "[H";
-    var rows = 0;
+    // The half-block rendering is exactly height/2 cell rows; scale the kitty
+    // image into that same cols×rows box so both paths take the same footprint
+    // (col 3 keeps the 72-wide scene inside an 80-column terminal).
+    let rows = (img.height + 1) / 2;
     if (caps.kitty_graphics) {
-        out = out + e + "[3;10H" + sprite.kitty_png(data);
-        rows = match (term.cell_px()) {
-            Option.Some(cell) => img.height / cell.1 + 1,
-            Option.None => img.height / 16 + 1,
-        };
+        out = out + e + "[2;3H" + sprite.kitty_png_box(data, img.width, rows);
     } else {
         let lines = sprite.render(img);
         var i = 0;
         while (i < lines.len()) {
-            out = out + e + "[" + to_string(3 + i) + ";10H" + lines[i];
+            out = out + e + "[" + to_string(2 + i) + ";3H" + lines[i];
             i = i + 1;
         }
-        rows = lines.len();
     }
-    out = out + e + "[" + to_string(5 + rows) + ";10H" + "rallyx — pulsa una tecla";
+    out = out + e + "[" + to_string(3 + rows) + ";3H" + "rallyx — el auto que tira humo · pulsa una tecla";
     write_now(out);
     io.read_timeout(64, 2500);
     write_now(e + "[2J");

@@ -62,6 +62,18 @@ pub fn render(img: image.Image) -> [string] {
 // escapes, chunked at 4096 payload bytes (m=1 … m=0). The terminal decodes
 // the PNG — we just deliver it at the cursor.
 pub fn kitty_png(data: bytes) -> string {
+    chunked(data, "a=T,f=100")
+}
+
+// Same delivery, but the terminal scales the image into a cols×rows cell box
+// (kitty c=/r=). We size that box to match the half-block footprint so both
+// rendering paths occupy the same space and a pixel-art asset scales up
+// crisply (nearest-neighbour) instead of showing at its tiny native size.
+pub fn kitty_png_box(data: bytes, cols: int, rows: int) -> string {
+    chunked(data, "a=T,f=100,c=" + to_string(cols) + ",r=" + to_string(rows))
+}
+
+fn chunked(data: bytes, head: string) -> string {
     let b64 = base64.base64(data);
     var out = "";
     var off = 0;
@@ -72,7 +84,7 @@ pub fn kitty_png(data: bytes) -> string {
             end = b64.len();
         }
         let more = if (end < b64.len()) { "1" } else { "0" };
-        let ctl = if (first) { "a=T,f=100,m=" + more } else { "m=" + more };
+        let ctl = if (first) { head + ",m=" + more } else { "m=" + more };
         out = out + esc() + "_G" + ctl + ";" + b64.substring(off, end) + esc() + "\\";
         first = false;
         off = end;

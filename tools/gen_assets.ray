@@ -1,66 +1,310 @@
-// rallyx — asset generator: the splash-screen car, drawn as character art
-// here and written out as a real RGBA PNG by the pure-raylang encoder.
-// Run from the project root: ray run tools/gen_assets.ray
+// rallyx — asset generator for the attract-screen HERO scene: a shaded
+// side-view race car on a strip of road with an exhaust plume, drawn pixel
+// by pixel (gradients, metallic hubcaps, a soft ground shadow, a 1px dark
+// rim) and written out as a real RGBA PNG by the pure-raylang encoder. The
+// output must survive std/image's strict decode — the same check the game
+// runs at splash time. Run from the project root:
+//   ray run tools/gen_assets.ray
 import std/fs;
 import std/image;
 import png;
 
-fn color_of(c: char) -> int {
-    if (c == 'Y') {
-        // Body yellow.
-        png.rgba(250, 200, 30, 255)
-    } else if (c == 'y') {
-        // Body shade.
-        png.rgba(200, 150, 10, 255)
-    } else if (c == 'R') {
-        // Racing stripe.
-        png.rgba(220, 50, 40, 255)
-    } else if (c == 'K') {
-        // Tires / outline.
-        png.rgba(25, 25, 30, 255)
-    } else if (c == 'W') {
-        // Windshield.
-        png.rgba(180, 220, 240, 255)
-    } else if (c == 'G') {
-        // Hubcaps / grill.
-        png.rgba(150, 150, 155, 255)
-    } else {
-        png.rgba(0, 0, 0, 0)
+const W: int = 72;
+const H: int = 40;
+
+// --- small helpers -------------------------------------------------------
+
+fn clamp8(v: int) -> int {
+    if (v < 0) {
+        return 0;
+    }
+    if (v > 255) {
+        return 255;
+    }
+    return v;
+}
+
+// Integer lerp from a to b as t runs 0..tmax.
+fn mix(a: int, b: int, t: int, tmax: int) -> int {
+    if (tmax <= 0) {
+        return a;
+    }
+    var tt = t;
+    if (tt < 0) {
+        tt = 0;
+    }
+    if (tt > tmax) {
+        tt = tmax;
+    }
+    return (a * (tmax - tt) + b * tt) / tmax;
+}
+
+fn rgb(r: int, g: int, b: int) -> int {
+    return png.rgba(clamp8(r), clamp8(g), clamp8(b), 255);
+}
+
+fn darken(c: int, num: int, den: int) -> int {
+    let r = (c >> 16 & 0xFF) * num / den;
+    let g = (c >> 8 & 0xFF) * num / den;
+    let b = (c & 0xFF) * num / den;
+    return rgb(r, g, b);
+}
+
+fn put(buf: [int], x: int, y: int, c: int) {
+    if (x >= 0 && x < W && y >= 0 && y < H) {
+        buf[y * W + x] = c;
     }
 }
 
-// 28×14, side view, facing right.
-fn car_rows() -> [string] {
-    [
-        "............................",
-        "...........KKKKKKKK.........",
-        "..........KWWWWWWyyK........",
-        ".........KWWYYYYYYyyK.......",
-        "...KKKKKKKYYYYYYYYYyyKKKK...",
-        "..KYYYYYYYYYRRYYYYYYYYYyyK..",
-        ".KYYYYYYYYYYRRYYYYYYYYYYyyK.",
-        ".KYYYYYYYYYYRRYYYYYYYYYYyyK.",
-        ".KKKKKKKKKKKKKKKKKKKKKKKKKK.",
-        "...KKGGKK.........KKGGKK....",
-        "..KKGGGGKK.......KKGGGGKK...",
-        "..KKGGGGKK.......KKGGGGKK...",
-        "...KKGGKK.........KKGGKK....",
-        "............................"
-    ]
+fn mark(buf: [int], mask: [int], x: int, y: int, c: int) {
+    if (x >= 0 && x < W && y >= 0 && y < H) {
+        buf[y * W + x] = c;
+        mask[y * W + x] = 1;
+    }
+}
+
+fn dist2(x: int, y: int, cx: int, cy: int) -> int {
+    let dx = x - cx;
+    let dy = y - cy;
+    return dx * dx + dy * dy;
+}
+
+// --- the car silhouette --------------------------------------------------
+// Left/right body edge per row, y = 15 (roof) .. 29 (sill). A narrow
+// greenhouse up top tapers into a wide lower body with a forward-sloping
+// hood and a rounded, tucked underside.
+
+fn span_l() -> [int] {
+    return [26, 25, 25, 24, 24, 23, 15, 12, 10, 8, 7, 7, 8, 10, 12];
+}
+
+fn span_r() -> [int] {
+    return [39, 41, 43, 46, 49, 52, 56, 60, 62, 63, 63, 63, 62, 61, 59];
+}
+
+// --- layers --------------------------------------------------------------
+
+const ROAD_TOP: int = 30;
+
+fn draw_road(buf: [int]) {
+    var y = ROAD_TOP;
+    while (y < H) {
+        let g = mix(72, 106, y - ROAD_TOP, H - 1 - ROAD_TOP);
+        var x = 0;
+        while (x < W) {
+            let streak = if ((x % 9) == 0) { 7 } else { 0 };
+            put(buf, x, y, rgb(g - streak, g - streak, g + 6));
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+    // Foreground centre line, dashed.
+    var x2 = 0;
+    while (x2 < W) {
+        if (((x2 / 5) % 2) == 0) {
+            put(buf, x2, 38, rgb(212, 196, 92));
+            put(buf, x2, 39, rgb(182, 166, 72));
+        }
+        x2 = x2 + 1;
+    }
+}
+
+// A soft dark ellipse on the road under the car (half-width 26, half-height 2).
+fn draw_shadow(buf: [int]) {
+    var y = 34;
+    while (y <= 38) {
+        var x = 8;
+        while (x <= 62) {
+            let dx = x - 35;
+            let dy = 13 * (y - 36);
+            if (dx * dx + dy * dy <= 676) {
+                let base = buf[y * W + x];
+                put(buf, x, y, darken(base, 45, 100));
+            }
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+}
+
+fn puff(buf: [int], cx: int, cy: int, r: int, g: int) {
+    var y = cy - r;
+    while (y <= cy + r) {
+        var x = cx - r;
+        while (x <= cx + r) {
+            let d = dist2(x, y, cx, cy);
+            if (d <= r * r) {
+                let shade = mix(g + 35, g - 18, d, r * r);
+                put(buf, x, y, rgb(shade, shade, shade + 4));
+            }
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+}
+
+// Exhaust plume trailing off the tail (left), rising and fading as it goes.
+// Kept behind the body (drawn first) so it reads as coming from the car.
+fn draw_smoke(buf: [int]) {
+    puff(buf, 7, 27, 3, 112);
+    puff(buf, 4, 24, 4, 126);
+    puff(buf, 3, 20, 4, 140);
+    puff(buf, 5, 16, 5, 152);
+    puff(buf, 9, 11, 4, 166);
+}
+
+const WY: int = 30;
+const R: int = 6;
+
+fn draw_wheel(buf: [int], mask: [int], cx: int) {
+    var y = WY - R;
+    while (y <= WY + R) {
+        var x = cx - R;
+        while (x <= cx + R) {
+            let d = dist2(x, y, cx, WY);
+            if (d <= R * R) {
+                if (d >= (R - 2) * (R - 2)) {
+                    mark(buf, mask, x, y, rgb(24, 24, 28));
+                } else if (d <= 3) {
+                    mark(buf, mask, x, y, rgb(216, 216, 222));
+                } else {
+                    // Metallic hubcap: brighter toward the top-left.
+                    let hl = (cx - x) + (WY - y);
+                    let s = 150 + hl * 5;
+                    mark(buf, mask, x, y, rgb(s, s, s + 5));
+                }
+            }
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+}
+
+// Sunlit-cream roof to deep-amber sill.
+fn body_color(y: int) -> int {
+    let r = mix(255, 205, y - 15, 14);
+    let g = mix(228, 150, y - 15, 14);
+    let b = mix(122, 20, y - 15, 14);
+    return rgb(r, g, b);
+}
+
+fn draw_body(buf: [int], mask: [int], xl: [int], xr: [int]) {
+    var y = 15;
+    while (y <= 29) {
+        let l = xl[y - 15];
+        let rr = xr[y - 15];
+        // Window band: the greenhouse rows, inset, split by a B-pillar.
+        let win = y >= 16 && y <= 19;
+        let wl = l + 2;
+        let wr = rr - 2;
+        let pillar = (l + rr) / 2;
+        var x = l;
+        while (x <= rr) {
+            var col = body_color(y);
+            if (win && x >= wl && x <= wr && x != pillar) {
+                // Glass: pale sky-blue, lighter up top, with a diagonal glare.
+                let gr = mix(150, 95, y - 16, 4);
+                let gg = mix(202, 150, y - 16, 4);
+                let gb = mix(226, 186, y - 16, 4);
+                col = rgb(gr, gg, gb);
+                if (((x + y) % 7) == 0) {
+                    col = rgb(232, 246, 255);
+                }
+            } else if ((y == 25 || y == 26) && x > l + 1 && x < rr - 1) {
+                // Racing stripe along the flank.
+                col = rgb(mix(214, 176, y - 25, 1), 48, 38);
+            }
+            mark(buf, mask, x, y, col);
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+}
+
+// A 1px dark rim wherever a car pixel meets a non-car pixel.
+fn draw_outline(buf: [int], mask: [int]) {
+    var y = 0;
+    while (y < H) {
+        var x = 0;
+        while (x < W) {
+            if (mask[y * W + x] == 1) {
+                let edge = mask[y * W + clamp8b(x - 1, y)] == 0 || mask[y * W + clamp8b(
+                    x + 1,
+                    y
+                )] == 0 || mask[clampr(y - 1) * W + x] == 0 || mask[clampr(y + 1) * W + x] == 0;
+                if (edge) {
+                    put(buf, x, y, darken(buf[y * W + x], 42, 100));
+                }
+            }
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+}
+
+fn clamp8b(x: int, y: int) -> int {
+    if (x < 0) {
+        return 0;
+    }
+    if (x >= W) {
+        return W - 1;
+    }
+    return x;
+}
+
+fn clampr(y: int) -> int {
+    if (y < 0) {
+        return 0;
+    }
+    if (y >= H) {
+        return H - 1;
+    }
+    return y;
+}
+
+fn draw_lights(buf: [int]) {
+    // Headlight cluster at the nose (right).
+    var y = 24;
+    while (y <= 26) {
+        put(buf, 60, y, rgb(255, 250, 205));
+        put(buf, 61, y, rgb(255, 244, 170));
+        y = y + 1;
+    }
+    // Taillight at the tail (left).
+    var y2 = 24;
+    while (y2 <= 26) {
+        put(buf, 8, y2, rgb(236, 70, 44));
+        put(buf, 9, y2, rgb(196, 44, 30));
+        y2 = y2 + 1;
+    }
+}
+
+fn draw() -> [int] {
+    var buf: [int] = [];
+    var mask: [int] = [];
+    var i = 0;
+    let n = W * H;
+    while (i < n) {
+        buf.push(png.rgba(0, 0, 0, 0));
+        mask.push(0);
+        i = i + 1;
+    }
+    draw_road(buf);
+    draw_shadow(buf);
+    draw_smoke(buf);
+    draw_wheel(buf, mask, 18);
+    draw_wheel(buf, mask, 52);
+    draw_body(buf, mask, span_l(), span_r());
+    draw_outline(buf, mask);
+    draw_lights(buf);
+    return buf;
 }
 
 fn main() -> int {
-    let rows = car_rows();
-    var pixels: [int] = [];
-    for r in rows {
-        for c in r.chars() {
-            pixels.push(color_of(c));
-        }
-    }
-    let img = png.Image { w: 28, h: rows.len(), pixels: pixels };
+    let img = png.Image { w: W, h: H, pixels: draw() };
     let data = png.encode_rgba(img);
     match (fs.mkdir("assets")) {
-        Result.Ok(n) => { },
+        Result.Ok(nn) => { },
         Result.Err(e) => {
             eprint("gen_assets: mkdir: " + e);
             return 1;
@@ -90,7 +334,9 @@ fn main() -> int {
         },
     }
     print(
-        "assets/car.png: " + to_string(data.len()) + " bytes, " + to_string(img.w) + "x" + to_string(img.h)
+        "assets/car.png: " + to_string(data.len()) + " bytes, " + to_string(img.w) + "x" + to_string(
+            img.h
+        )
     );
     0
 }

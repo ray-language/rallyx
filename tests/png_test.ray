@@ -190,6 +190,23 @@ fn kitty_apc_is_chunked_and_terminated() {
 }
 
 @test
+fn kitty_box_scales_into_a_cell_grid() {
+    // The boxed variant carries the c=/r= cell footprint in the first chunk.
+    let boxed = sprite.kitty_png_box(b"tiny", 72, 20);
+    assert(boxed.contains("_Ga=T,f=100,c=72,r=20,m=0;"));
+    // Continuation chunks stay plain m=… (footprint only on the first).
+    var big: [int] = [];
+    var i = 0;
+    while (i < 4000) {
+        big.push(i & 0xFF);
+        i = i + 1;
+    }
+    let apc = sprite.kitty_png_box(bytes_of(big), 40, 10);
+    assert(apc.contains("_Ga=T,f=100,c=40,r=10,m=1;"));
+    assert(apc.contains("_Gm=0;"));
+}
+
+@test
 fn da1_parser_reads_the_terminal_reply() {
     assert_eq(term.parse_device_attributes(b"\x1b[?64;1;4c"), [64, 1, 4]);
     var none: [int] = [];
