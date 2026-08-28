@@ -1,0 +1,81 @@
+// rallyx — asset generator: the splash-screen car, drawn as character art
+// here and written out as a real RGBA PNG by the pure-raylang encoder.
+// Run from the project root: ray run tools/gen_assets.ray
+import std/fs;
+import png;
+
+fn color_of(c: char) -> int {
+    if (c == 'Y') {
+        // Body yellow.
+        png.rgba(250, 200, 30, 255)
+    } else if (c == 'y') {
+        // Body shade.
+        png.rgba(200, 150, 10, 255)
+    } else if (c == 'R') {
+        // Racing stripe.
+        png.rgba(220, 50, 40, 255)
+    } else if (c == 'K') {
+        // Tires / outline.
+        png.rgba(25, 25, 30, 255)
+    } else if (c == 'W') {
+        // Windshield.
+        png.rgba(180, 220, 240, 255)
+    } else if (c == 'G') {
+        // Hubcaps / grill.
+        png.rgba(150, 150, 155, 255)
+    } else {
+        png.rgba(0, 0, 0, 0)
+    }
+}
+
+// 28×14, side view, facing right.
+fn car_rows() -> [string] {
+    [
+        "............................",
+        "...........KKKKKKKK.........",
+        "..........KWWWWWWyyK........",
+        ".........KWWYYYYYYyyK.......",
+        "...KKKKKKKYYYYYYYYYyyKKKK...",
+        "..KYYYYYYYYYRRYYYYYYYYYyyK..",
+        ".KYYYYYYYYYYRRYYYYYYYYYYyyK.",
+        ".KYYYYYYYYYYRRYYYYYYYYYYyyK.",
+        ".KKKKKKKKKKKKKKKKKKKKKKKKKK.",
+        "...KKGGKK.........KKGGKK....",
+        "..KKGGGGKK.......KKGGGGKK...",
+        "..KKGGGGKK.......KKGGGGKK...",
+        "...KKGGKK.........KKGGKK....",
+        "............................"
+    ]
+}
+
+fn main() -> int {
+    let rows = car_rows();
+    var pixels: [int] = [];
+    for r in rows {
+        for c in r.chars() {
+            pixels.push(color_of(c));
+        }
+    }
+    let img = png.Image { w: 28, h: rows.len(), pixels: pixels };
+    let data = png.encode_rgba(img);
+    match (fs.mkdir("assets")) {
+        Result.Ok(n) => { },
+        Result.Err(e) => {
+            eprint("gen_assets: mkdir: " + e);
+            return 1;
+        },
+    }
+    let h = match (fs.open("assets/car.png", "w")) {
+        Result.Ok(handle) => handle,
+        Result.Err(e) => {
+            eprint("gen_assets: " + e);
+            return 1;
+        },
+    };
+    fs.write_bytes(h, data);
+    close(h);
+    print(
+        "assets/car.png: " + to_string(data.len()) + " bytes, " + to_string(img.w) + "x" + to_string(img.h)
+    );
+    0
+}

@@ -1,0 +1,299 @@
+// rallyx — a pure-raylang PNG codec, sized for sprites.
+//
+// Decode: 8-bit RGB (color type 2), RGBA (6) and palette (3), filters 0–4,
+// no interlace. IDAT decompresses through std/inflate (the CRC and Adler
+// checksums are not verified on read).
+// Encode: RGBA with filter 0 and STORED deflate blocks — no compressor
+// needed — with correct CRC-32 and Adler-32, so any external tool accepts
+// the file. Enough to round-trip tests and to generate the game's assets
+// from raylang itself.
+import std/fs;
+from std/inflate import zlib_inflate;
+
+// A pixel is (a << 24) | (r << 16) | (g << 8) | b.
+pub struct Image {
+    w: int,
+    h: int,
+    pixels: [int],
+}
+
+pub fn pixel_a(p: int) -> int {
+    p >> 24 & 0xFF
+}
+
+pub fn pixel_r(p: int) -> int {
+    p >> 16 & 0xFF
+}
+
+pub fn pixel_g(p: int) -> int {
+    p >> 8 & 0xFF
+}
+
+pub fn pixel_b(p: int) -> int {
+    p & 0xFF
+}
+
+pub fn rgba(r: int, g: int, b: int, a: int) -> int {
+    a << 24 | r << 16 | g << 8 | b
+}
+
+pub fn signature() -> bytes {
+    b"\x89PNG\r\n\x1a\n"
+}
+
+fn u32be(data: bytes, off: int) -> int {
+    data[off] << 24 | data[off + 1] << 16 | data[off + 2] << 8 | data[off + 3]
+}
+
+fn be32(n: int) -> [int] {
+    [n >> 24 & 0xFF, n >> 16 & 0xFF, n >> 8 & 0xFF, n & 0xFF]
+}
+
+fn iabs(n: int) -> int {
+    if (n < 0) { 0 - n } else { n }
+}
+
+// ---- decode ----------------------------------------------------------------
+
+fn paeth(a: int, b: int, c: int) -> int {
+    let p = a + b - c;
+    let pa = iabs(p - a);
+    let pb = iabs(p - b);
+    let pc = iabs(p - c);
+    if (pa <= pb && pa <= pc) { a } else if (pb <= pc) { b } else { c }
+}
+
+// Undo the per-row filter in place over the raw inflated stream.
+// Returns the unfiltered samples (rows of w*bpp), or Err on a bad filter.
+fn unfilter(raw: bytes, w: int, h: int, bpp: int) -> Result<[int], string> {
+    let stride = w * bpp;
+    if (raw.len() < h * (stride + 1)) {
+        return Result.Err("png: truncated pixel data");
+    }
+    var out: [int] = [];
+    var y = 0;
+    while (y < h) {
+        let base = y * (stride + 1);
+        let filter = raw[base];
+        var i = 0;
+        while (i < stride) {
+            let x = raw[base + 1 + i];
+            let left = if (i >= bpp) { out[y * stride + i - bpp] } else { 0 };
+            let up = if (y > 0) { out[(y - 1) * stride + i] } else { 0 };
+            let up_left = if (y > 0 && i >= bpp) { out[(y - 1) * stride + i - bpp] } else { 0 };
+            let v = if (filter == 0) { x } else if (filter == 1) { x + left } else {
+                if (filter == 2) { x + up } else if (filter == 3) { x + (left + up) / 2 } else {
+                    if (filter == 4) { x + paeth(left, up, up_left) } else { 0 - 1 }
+                }
+            };
+            if (v < 0) {
+                return Result.Err("png: bad filter type " + to_string(filter));
+            }
+            out.push(v & 0xFF);
+            i = i + 1;
+        }
+        y = y + 1;
+    }
+    Result.Ok(out)
+}
+
+pub fn decode(data: bytes) -> Result<Image, string> {
+    if (data.len() < 8 || data.sub_bytes(0, 8) != signature()) {
+        return Result.Err("png: bad signature");
+    }
+    var w = 0;
+    var h = 0;
+    var color_type = 0 - 1;
+    var palette: [int] = [];
+    var idat = b"";
+    var off = 8;
+    while (off + 8 <= data.len()) {
+        let clen = u32be(data, off);
+        let tag = match (from_utf8(data.sub_bytes(off + 4, off + 8))) {
+            Result.Ok(t) => t,
+            Result.Err(bad) => {
+                return Result.Err("png: bad chunk tag");
+            },
+        };
+        if (off + 8 + clen + 4 > data.len()) {
+            return Result.Err("png: truncated chunk " + tag);
+        }
+        let body = data.sub_bytes(off + 8, off + 8 + clen);
+        if (tag == "IHDR") {
+            w = u32be(body, 0);
+            h = u32be(body, 4);
+            let depth = body[8];
+            color_type = body[9];
+            if (depth != 8) {
+                return Result.Err("png: only 8-bit depth supported");
+            }
+            if (color_type != 2 && color_type != 3 && color_type != 6) {
+                return Result.Err("png: unsupported color type " + to_string(color_type));
+            }
+            if (body[12] != 0) {
+                return Result.Err("png: interlace not supported");
+            }
+        } else if (tag == "PLTE") {
+            var i = 0;
+            while (i + 2 < clen) {
+                palette.push(rgba(body[i], body[i + 1], body[i + 2], 255));
+                i = i + 3;
+            }
+        } else if (tag == "IDAT") {
+            idat = idat + body;
+        } else if (tag == "IEND") {
+            off = data.len();
+        }
+        if (off < data.len()) {
+            off = off + 8 + clen + 4;
+        }
+    }
+    if (color_type < 0) {
+        return Result.Err("png: missing IHDR");
+    }
+    if (w <= 0 || h <= 0 || w * h > 1 << 22) {
+        return Result.Err("png: unreasonable dimensions");
+    }
+    let bpp = if (color_type == 6) { 4 } else if (color_type == 2) { 3 } else { 1 };
+    let raw = match (zlib_inflate(idat)) {
+        Result.Ok(b) => b,
+        Result.Err(e) => {
+            return Result.Err("png: inflate: " + e);
+        },
+    };
+    let samples = match (unfilter(raw, w, h, bpp)) {
+        Result.Ok(s) => s,
+        Result.Err(e) => {
+            return Result.Err(e);
+        },
+    };
+    var pixels: [int] = [];
+    var i = 0;
+    while (i < w * h) {
+        let base = i * bpp;
+        if (color_type == 6) {
+            pixels.push(
+                rgba(samples[base], samples[base + 1], samples[base + 2], samples[base + 3])
+            );
+        } else if (color_type == 2) {
+            pixels.push(rgba(samples[base], samples[base + 1], samples[base + 2], 255));
+        } else {
+            let idx = samples[base];
+            if (idx >= palette.len()) {
+                return Result.Err("png: palette index out of range");
+            }
+            pixels.push(palette[idx]);
+        }
+        i = i + 1;
+    }
+    Result.Ok(Image { w: w, h: h, pixels: pixels })
+}
+
+pub fn load(path: string) -> Result<Image, string> {
+    match (fs.read_file_bytes(path)) {
+        Result.Ok(data) => decode(data),
+        Result.Err(e) => Result.Err(e),
+    }
+}
+
+// ---- encode ----------------------------------------------------------------
+
+fn crc32(data: bytes) -> int {
+    var crc = 0xFFFFFFFF;
+    var i = 0;
+    while (i < data.len()) {
+        crc = crc ^ data[i];
+        var k = 0;
+        while (k < 8) {
+            let lsb = crc & 1;
+            crc = crc >> 1;
+            if (lsb == 1) {
+                crc = crc ^ 0xEDB88320;
+            }
+            k = k + 1;
+        }
+        i = i + 1;
+    }
+    crc ^ 0xFFFFFFFF
+}
+
+fn adler32(data: bytes) -> int {
+    var a = 1;
+    var b = 0;
+    var i = 0;
+    while (i < data.len()) {
+        a = (a + data[i]) % 65521;
+        b = (b + a) % 65521;
+        i = i + 1;
+    }
+    return b << 16 | a;
+}
+
+pub fn chunk(tag: string, body: bytes) -> bytes {
+    let payload = tag.to_bytes() + body;
+    bytes_of(be32(body.len())) + payload + bytes_of(be32(crc32(payload)))
+}
+
+// Wrap raw data in a zlib stream of STORED deflate blocks (no compression).
+pub fn zlib_store(raw: bytes) -> bytes {
+    var out: [int] = [0x78, 0x1];
+    var off = 0;
+    var done = false;
+    while (!done) {
+        var n = raw.len() - off;
+        if (n > 65535) {
+            n = 65535;
+        }
+        let last = off + n >= raw.len();
+        out.push(if (last) { 1 } else { 0 });
+        out.push(n & 0xFF);
+        out.push(n >> 8 & 0xFF);
+        out.push((n ^ 0xFFFF) & 0xFF);
+        out.push((n ^ 0xFFFF) >> 8 & 0xFF);
+        var i = 0;
+        while (i < n) {
+            out.push(raw[off + i]);
+            i = i + 1;
+        }
+        off = off + n;
+        done = last;
+    }
+    bytes_of(out) + bytes_of(be32(adler32(raw)))
+}
+
+pub fn ihdr(w: int, h: int, color_type: int) -> bytes {
+    var body = be32(w);
+    for v in be32(h) {
+        body.push(v);
+    }
+    body.push(8);
+    body.push(color_type);
+    body.push(0);
+    body.push(0);
+    body.push(0);
+    chunk("IHDR", bytes_of(body))
+}
+
+// RGBA, filter 0 on every row, stored blocks: a valid PNG any tool opens.
+pub fn encode_rgba(img: Image) -> bytes {
+    var raw: [int] = [];
+    var y = 0;
+    while (y < img.h) {
+        raw.push(0);
+        var x = 0;
+        while (x < img.w) {
+            let p = img.pixels[y * img.w + x];
+            raw.push(pixel_r(p));
+            raw.push(pixel_g(p));
+            raw.push(pixel_b(p));
+            raw.push(pixel_a(p));
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+    signature() + ihdr(
+        img.w,
+        img.h,
+        6
+    ) + chunk("IDAT", zlib_store(bytes_of(raw))) + chunk("IEND", b"")
+}

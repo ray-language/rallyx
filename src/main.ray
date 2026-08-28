@@ -1,18 +1,46 @@
 // rallyx — Rally-X in the terminal: grab the flags, smoke the chasers.
 import std/random;
 import app;
+import png;
+import sprite;
+
+fn show_img(path: string) -> int {
+    match (png.load(path)) {
+        Result.Ok(img) => {
+            for line in sprite.render(img) {
+                print(line);
+            }
+            0
+        },
+        Result.Err(e) => {
+            eprint("rallyx: " + path + ": " + e);
+            1
+        },
+    }
+}
 
 fn main() -> int {
     let av = args();
-    for a in av {
+    var i = 0;
+    while (i < av.len()) {
+        let a = av[i];
+        if (a == "--img") {
+            if (i + 1 >= av.len()) {
+                eprint("rallyx: --img needs a PNG file");
+                return 2;
+            }
+            return show_img(av[i + 1]);
+        }
         if (a == "--seed") {
             random.seed(42);
         }
         if (a == "--help" || a == "-h") {
-            eprint("usage: rallyx [--seed]");
+            eprint("usage: rallyx [--seed] [--img file.png]");
             eprint("  ↑↓←→ conducir · espacio humo · p pausa · r reiniciar · q salir");
+            eprint("  --img: dibuja un PNG en el terminal (half-blocks truecolor) y sale");
             return 0;
         }
+        i = i + 1;
     }
     app.play()
 }

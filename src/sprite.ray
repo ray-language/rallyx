@@ -1,0 +1,55 @@
+// rallyx — truecolor half-block sprite renderer: each terminal cell is two
+// stacked pixels (▀ with 24-bit fg = top, bg = bottom), the technique of
+// chafa/viu. Alpha < 128 is transparent (the terminal's own background
+// shows through).
+import png;
+
+fn esc() -> string {
+    "\u{1B}"
+}
+
+fn fg(p: int) -> string {
+    esc() + "[38;2;" + to_string(
+        png.pixel_r(p)
+    ) + ";" + to_string(png.pixel_g(p)) + ";" + to_string(png.pixel_b(p)) + "m"
+}
+
+fn bg(p: int) -> string {
+    esc() + "[48;2;" + to_string(
+        png.pixel_r(p)
+    ) + ";" + to_string(png.pixel_g(p)) + ";" + to_string(png.pixel_b(p)) + "m"
+}
+
+fn opaque(p: int) -> bool {
+    png.pixel_a(p) >= 128
+}
+
+// One text line per two pixel rows. Every line ends with a reset so the
+// sprite composes into any frame.
+pub fn render(img: png.Image) -> [string] {
+    var out: [string] = [];
+    var y = 0;
+    while (y < img.h) {
+        var line = "";
+        var x = 0;
+        while (x < img.w) {
+            let top = img.pixels[y * img.w + x];
+            let bottom = if (y + 1 < img.h) { img.pixels[(y + 1) * img.w + x] } else { 0 };
+            let top_on = opaque(top);
+            let bottom_on = y + 1 < img.h && opaque(bottom);
+            if (top_on && bottom_on) {
+                line = line + fg(top) + bg(bottom) + "▀";
+            } else if (top_on) {
+                line = line + esc() + "[0m" + fg(top) + "▀";
+            } else if (bottom_on) {
+                line = line + esc() + "[0m" + fg(bottom) + "▄";
+            } else {
+                line = line + esc() + "[0m ";
+            }
+            x = x + 1;
+        }
+        out.push(line + esc() + "[0m");
+        y = y + 2;
+    }
+    out
+}

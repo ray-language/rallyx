@@ -5,7 +5,17 @@ Rally-X de terminal a 30 fps, escrito en [raylang](https://github.com/ray-langua
 ```text
 $ rallyx             # ↑↓←→ conducir · espacio humo · p pausa · r reiniciar · q salir
 $ rallyx --seed      # ciudad determinista (banderas/rocas con semilla fija)
+$ rallyx --img f.png # dibuja cualquier PNG en el terminal (half-blocks truecolor) y sale
 ```
+
+Con `std/inflate` en el lenguaje, rallyx trae ahora un **codec PNG puro en
+raylang** (`src/png.ray`: IDAT vía `zlib_inflate`, filtros 0–4, RGB/RGBA/
+paleta) y un **renderer de sprites** por half-blocks truecolor
+(`src/sprite.ray`: `▀` con fg = píxel superior y bg = inferior — 2 px por
+celda, la técnica de chafa/viu). El splash de arranque dibuja el coche desde
+`assets/car.png` — un PNG **generado por el propio encoder raylang**
+(`ray run tools/gen_assets.ray`: bloques DEFLATE stored + CRC-32 + Adler-32;
+`file` y `sips` lo aceptan).
 
 ## Las reglas
 
@@ -59,8 +69,11 @@ La disciplina de raygame (Tetris), con un reloj más y una cámara:
 | Rondas progresivas (más rojos, más rápidos), 3 vidas, high score | ✅ |
 | 30 fps con input sin bloqueo + diff mínimo con cámara clavada | ✅ |
 | Binario nativo (jugado bajo pty) | ✅ |
-| Tests (reglas + volante + cámara + frame) | ✅ 10 |
+| Codec PNG puro (decode 2/3/6 + filtros 0–4; encode stored+CRC) | ✅ |
+| Sprites half-block truecolor: splash con el coche + visor `--img` | ✅ |
+| Tests (reglas + volante + cámara + frame + codec PNG + sprites) | ✅ 16 |
 | Bache que frena, persecución con lookahead (BFS), túneles laterales | 📋 v2 |
+| Sprites en celda de juego, música WSG vía `stdin_pipe` + ffplay | 📋 v2 |
 
 ## Hallazgos de dogfood
 
@@ -74,6 +87,18 @@ La disciplina de raygame (Tetris), con un reloj más y una cámara:
    diagnóstico del checker lo explica y sugiere `return`/`let`. Buen error.
 3. Lo demás salió a la primera sobre la superficie M115–M127 (v1 del juego:
    tests 8/8 y pty al primer intento).
+4. **`std/inflate` sostiene un decoder PNG completo** sin fricción: con
+   `zlib_inflate` + `bytes` indexables + `bytes_of` + bits/hex, el codec
+   entero (decode con los 5 filtros + encode stored con CRC-32/Adler-32
+   correctos) son ~300 líneas puras y testeables; el PNG generado lo aceptan
+   `file` y `sips`. Único tropiezo: dos veces el gotcha de la cola `(a | b)`
+   / `(a, b)` tras un bloque (el diagnóstico del checker lo resuelve solo).
+5. Correcciones recibidas al mapa de audio del README anterior:
+   `process.cmd(...).stdin_pipe().stream()` + `Proc.write` (M100 v3) da
+   stdin vivo CON contrapresión (música reactiva vía `ffplay -f s16le -i -`
+   funciona hoy), y el FFI existe desde M41 — lo no bindeable es solo el
+   audio *pull* de CoreAudio (sin callbacks C→raylang); ALSA (push) sí.
+   La asimetría macOS/Linux es el argumento real para un `std/audio`.
 
 ## Desarrollo
 

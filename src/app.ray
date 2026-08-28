@@ -8,6 +8,8 @@ import std/term;
 from std/term import Key;
 import rally;
 import screen;
+import png;
+import sprite;
 
 const FRAME_MS: int = 33;
 
@@ -128,6 +130,30 @@ fn drain_keys(a: App) {
     }
 }
 
+// The arcade attract screen: the car sprite in truecolor half-blocks.
+// Skipped silently when the asset is not around (running far from the
+// project root).
+fn splash() {
+    let img = match (png.load("assets/car.png")) {
+        Result.Ok(im) => im,
+        Result.Err(e) => {
+            return;
+        },
+    };
+    let e = screen.esc();
+    var out = e + "[2J" + e + "[H";
+    let lines = sprite.render(img);
+    var i = 0;
+    while (i < lines.len()) {
+        out = out + e + "[" + to_string(3 + i) + ";10H" + lines[i];
+        i = i + 1;
+    }
+    out = out + e + "[" + to_string(5 + lines.len()) + ";10H" + "rallyx — pulsa una tecla";
+    write_now(out);
+    io.read_timeout(64, 2500);
+    write_now(e + "[2J");
+}
+
 fn event_loop() -> int {
     var empty: [string] = [];
     let a = App {
@@ -140,6 +166,7 @@ fn event_loop() -> int {
     };
     let e = screen.esc();
     write_now(e + "[?1049h" + e + "[?25l" + e + "[2J" + e + "[H");
+    splash();
     repaint(a);
     var next_frame = time.monotonic() + FRAME_MS;
     var next_player = time.monotonic() + rally.player_ms(a.g);
