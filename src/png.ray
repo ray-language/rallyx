@@ -117,9 +117,8 @@ pub fn encode_rgba(img: Image) -> bytes {
         }
         y = y + 1;
     }
-    signature() + ihdr(
-        img.w,
-        img.h,
-        6
-    ) + chunk("IDAT", zlib_store(bytes_of(raw))) + chunk("IEND", b"")
+    signature()
+        + ihdr(img.w, img.h, 6)
+        + chunk("IDAT", zlib_store(bytes_of(raw)))
+        + chunk("IEND", b"")
 }

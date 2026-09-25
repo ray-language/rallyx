@@ -27,7 +27,15 @@ fn main() -> int {
         let took = time.monotonic() - w0;
         if (n % 3 == 0 || took > 20) {
             print(
-                "chunk " + to_string(n) + ": write " + to_string(took) + " ms (audio total " + to_string((n + 1) * 110) + " ms, wall " + to_string(time.monotonic() - t0) + " ms)"
+                "chunk "
+                    + to_string(n)
+                    + ": write "
+                    + to_string(took)
+                    + " ms (audio total "
+                    + to_string((n + 1) * 110)
+                    + " ms, wall "
+                    + to_string(time.monotonic() - t0)
+                    + " ms)"
             );
         }
         n = n + 1;

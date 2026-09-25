@@ -10,6 +10,7 @@ import std/image;
 import png;
 
 const W: int = 72;
+
 const H: int = 40;
 
 // --- small helpers -------------------------------------------------------
@@ -154,6 +155,7 @@ fn draw_smoke(buf: [int]) {
 }
 
 const WY: int = 30;
+
 const R: int = 6;
 
 fn draw_wheel(buf: [int], mask: [int], cx: int) {
@@ -228,10 +230,10 @@ fn draw_outline(buf: [int], mask: [int]) {
         var x = 0;
         while (x < W) {
             if (mask[y * W + x] == 1) {
-                let edge = mask[y * W + clamp8b(x - 1, y)] == 0 || mask[y * W + clamp8b(
-                    x + 1,
-                    y
-                )] == 0 || mask[clampr(y - 1) * W + x] == 0 || mask[clampr(y + 1) * W + x] == 0;
+                let edge = mask[y * W + clamp8b(x - 1, y)] == 0
+                    || mask[y * W + clamp8b(x + 1, y)] == 0
+                    || mask[clampr(y - 1) * W + x] == 0
+                    || mask[clampr(y + 1) * W + x] == 0;
                 if (edge) {
                     put(buf, x, y, darken(buf[y * W + x], 42, 100));
                 }
@@ -334,9 +336,12 @@ fn main() -> int {
         },
     }
     print(
-        "assets/car.png: " + to_string(data.len()) + " bytes, " + to_string(img.w) + "x" + to_string(
-            img.h
-        )
+        "assets/car.png: "
+            + to_string(data.len())
+            + " bytes, "
+            + to_string(img.w)
+            + "x"
+            + to_string(img.h)
     );
     0
 }
