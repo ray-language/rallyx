@@ -3,8 +3,8 @@
 // term.capabilities() says so, truecolor half-blocks (▀ fg = top pixel,
 // bg = bottom pixel — chafa/viu's technique) everywhere else. Alpha < 128
 // is transparent.
-import std/base64;
 import std/image;
+import std/term;
 
 fn esc() -> string {
     "\u{1B}"
@@ -69,10 +69,10 @@ pub fn render(img: image.Image) -> [string] {
 }
 
 // The kitty graphics protocol: the PNG file itself, base64ed into APC
-// escapes, chunked at 4096 payload bytes (m=1 … m=0). The terminal decodes
-// the PNG — we just deliver it at the cursor.
+// escapes and chunked (m=1 … m=0) by std/term's kitty_chunks. The terminal
+// decodes the PNG — we just deliver it at the cursor.
 pub fn kitty_png(data: bytes) -> string {
-    chunked(data, "a=T,f=100")
+    term.kitty_chunks("a=T,f=100", data)
 }
 
 // Same delivery, but pin the on-screen size to a cols×rows cell box (kitty
@@ -80,24 +80,5 @@ pub fn kitty_png(data: bytes) -> string {
 // pixel art up huge; a small box keeps it compact so the pixels don't read
 // as chunky. The image bytes are untouched — this is display size only.
 pub fn kitty_png_box(data: bytes, cols: int, rows: int) -> string {
-    chunked(data, "a=T,f=100,c=" + to_string(cols) + ",r=" + to_string(rows))
-}
-
-fn chunked(data: bytes, head: string) -> string {
-    let b64 = base64.base64(data);
-    var out = "";
-    var off = 0;
-    var first = true;
-    while (off < b64.len() || first) {
-        var end = off + 4096;
-        if (end > b64.len()) {
-            end = b64.len();
-        }
-        let more = if (end < b64.len()) { "1" } else { "0" };
-        let ctl = if (first) { head + ",m=" + more } else { "m=" + more };
-        out = out + esc() + "_G" + ctl + ";" + b64.substring(off, end) + esc() + "\\";
-        first = false;
-        off = end;
-    }
-    out
+    term.kitty_chunks("a=T,f=100,c=" + to_string(cols) + ",r=" + to_string(rows), data)
 }

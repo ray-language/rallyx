@@ -51,11 +51,13 @@ compañía se detectan solos. La portada es una **escena hero**
 generada por píxel en `tools/gen_assets.ray`: coche lateral con degradado
 carrocería→sombra, tapacubos metálicos, faros, sombra al suelo y una
 **estela de humo** ascendente, todo dibujado por capas con borde de 1 px.
-`src/png.ray` queda como **encoder** puro (stored + CRC-32/Adler-32): genera
-`assets/car.png` (`ray run tools/gen_assets.ray`, auto-verificado contra
-`std/image`) y alimenta los **tests diferenciales** — los vectores de
+`assets/car.png` lo escribe **`image.encode_png`** (M164, zlib comprimido:
+1.1 KB frente a los 11.6 KB del PNG stored de antes; `ray run
+tools/gen_assets.ray`, auto-verificado píxel a píxel contra `std/image`).
+`src/png.ray` queda como **encoder** puro independiente (stored + CRC-32/
+Adler-32) que alimenta los **tests diferenciales** — los vectores de
 filtros calculados a mano que validaron el decoder propio ahora fijan el de
-`std/image`.
+`std/image`, y un test cruza ambos encoders.
 
 ## Las reglas
 
@@ -117,29 +119,30 @@ La disciplina de raygame (Tetris), con un reloj más y una cámara:
 | Rondas progresivas (más rojos, más rápidos), 3 vidas, high score | ✅ |
 | 30 fps con input sin bloqueo + diff mínimo con cámara clavada | ✅ |
 | Binario nativo (jugado bajo pty) | ✅ |
-| PNG: decode vía `std/image` + encoder propio (stored+CRC) con tests diferenciales | ✅ |
+| PNG: decode/encode vía `std/image` + encoder propio (stored+CRC) para tests diferenciales | ✅ |
 | Sprites: escena hero de portada (kitty en box chico o half-blocks) | ✅ |
 | Música WSG reactiva en vivo (sirena/jingle/choque/game over) vía `std/audio` | ✅ |
 | SFX: pshh de humo (ruido LFSR, roba la voz del arpegio) + drone de motor | ✅ |
 | v2: túneles laterales con wrap (coche, humo y BFS los cruzan) | ✅ |
 | v2: baches que arrastran el coche; persecución BFS con radio + fallback | ✅ |
 | v2: motor ligado al coche real (rueda / ralentí / petardeo sin gasolina) | ✅ |
-| Tests (reglas + volante + cámara + frame + PNG diferencial + sprites + sinte) | ✅ 32 |
+| Tests (reglas + volante + cámara + frame + PNG diferencial + sprites + sinte) | ✅ 34 |
 | Sprites en celda de juego (necesita ≥8×8 px/celda: no cabe en un term 80×24) | 📋 v3 |
 
 ## Hallazgos de dogfood
 
-1. **`ray build --native -o X` sobre un `X` existente → SIGKILL en macOS**
+1. **[RESUELTO — raylang M163]** **`ray build --native -o X` sobre un `X` existente → SIGKILL en macOS**
    (reportado al proyecto raylang): sobrescribir el binario in-place
    invalida la firma ad-hoc y el kernel mata el proceso al exec (exit 137,
    incluso `--help`). Workaround: `rm -f` antes de recompilar. Propuesta:
-   que `ray build` haga unlink/rename del output.
-2. Gotcha de parser (documentado): una tupla `(cx, cy)` como cola de función
+   que `ray build` haga unlink/rename del output. Hoy compila a `X.tmp` y
+   renombra: el `rm -f` ya no hace falta.
+2. **[RESUELTO — raylang 1.5 (M153)]** Gotcha de parser (documentado): una tupla `(cx, cy)` como cola de función
    justo tras un bloque `if` se parsea como llamada al valor del bloque — el
    diagnóstico del checker lo explica y sugiere `return`/`let`. Buen error.
 3. Lo demás salió a la primera sobre la superficie M115–M127 (v1 del juego:
    tests 8/8 y pty al primer intento).
-3b. **`term.capabilities()` no es reentrante dentro de `term.raw`**
+3b. **[RESUELTO — raylang 1.4]** **`term.capabilities()` no es reentrante dentro de `term.raw`**
    (reportado al proyecto raylang): llamada dentro de nuestra sesión raw, su
    restauración interna deja el terminal cocinado → todas las teclas
    muertas. Workaround aplicado: detectarla ANTES de `term.raw` y pasar el
@@ -188,13 +191,17 @@ La disciplina de raygame (Tetris), con un reloj más y una cámara:
    dispositivo reproduce lo nuevo al instante (autocura, sin el desfase
    permanente de ffplay). Propuesto al proyecto raylang: o un tope de
    cola configurable en `open` (latency hint) o un `audio.played_ms(h)`
-   para cerrar el lazo sin reloj propio.
+   para cerrar el lazo sin reloj propio. **[EN PARTE — raylang M158]**:
+   existen `audio.open_latency` y `audio.played_ms`, pero medido en macOS
+   (1.27.11) el hint no acota la cola a 22050 Hz mono: con 30 ms, `write`
+   sigue absorbiendo ~1.6 s antes de aparcar. El adelanto de reloj de pared
+   se queda.
 
 ## Desarrollo
 
 ```sh
 ray test
-rm -f rallyx && ray build --native src/main.ray -o rallyx --release   # ver hallazgo 1
+ray build --native src/main.ray -o rallyx --release
 ```
 
 Estructura: `src/main.ray` · `rally.ray` (reglas puras) · `screen.ray`

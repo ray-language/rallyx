@@ -167,23 +167,24 @@ fn on_key(a: App, k: Key) {
 }
 
 fn drain_keys(a: App) {
-    var more = true;
-    while (more && a.pending.len() > 0 && !a.quit) {
+    while (a.pending.len() > 0 && !a.quit) {
         match (term.decode(a.pending)) {
             Option.Some(decoded) => {
                 a.pending = a.pending.sub_bytes(decoded.1, a.pending.len());
                 on_key(a, decoded.0);
             },
             Option.None => {
-                more = false;
-                if (a.pending == b"\x1b") {
-                    a.pending = b"";
-                } else if (a.pending.len() > 8) {
+                if (a.pending.len() > 8) {
                     // A stray terminal reply (DA1 and friends) must never
                     // wedge the key stream: drop a byte and resync.
                     a.pending = a.pending.sub_bytes(1, a.pending.len());
-                    more = true;
+                    continue;
                 }
+                // Incomplete prefix: wait for the rest (a lone ESC is dropped).
+                if (a.pending == b"\x1b") {
+                    a.pending = b"";
+                }
+                break;
             },
         }
     }

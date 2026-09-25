@@ -1,9 +1,10 @@
 // rallyx — asset generator for the attract-screen HERO scene: a shaded
 // side-view race car on a strip of road with an exhaust plume, drawn pixel
 // by pixel (gradients, metallic hubcaps, a soft ground shadow, a 1px dark
-// rim) and written out as a real RGBA PNG by the pure-raylang encoder. The
-// output must survive std/image's strict decode — the same check the game
-// runs at splash time. Run from the project root:
+// rim) and written out as a compressed RGBA PNG by std/image's encoder
+// (encode_png, M164). The output must decode back to the exact pixels drawn
+// — the same strict decode the game runs at splash time. Run from the
+// project root:
 //   ray run tools/gen_assets.ray
 import std/fs;
 import std/image;
@@ -302,9 +303,28 @@ fn draw() -> [int] {
     return buf;
 }
 
+// Unpack the drawing's (a << 24 | r << 16 | g << 8 | b) pixels into the
+// RGBA8 octets std/image works in.
+fn to_rgba(pixels: [int]) -> bytes {
+    var out: [int] = [];
+    for p in pixels {
+        out.push(p >> 16 & 0xFF);
+        out.push(p >> 8 & 0xFF);
+        out.push(p & 0xFF);
+        out.push(p >> 24 & 0xFF);
+    }
+    bytes_of(out)
+}
+
 fn main() -> int {
-    let img = png.Image { w: W, h: H, pixels: draw() };
-    let data = png.encode_rgba(img);
+    let img = image.Image { width: W, height: H, pixels: to_rgba(draw()) };
+    let data = match (image.encode_png(img)) {
+        Result.Ok(d) => d,
+        Result.Err(e) => {
+            eprint("gen_assets: encode: " + e);
+            return 1;
+        },
+    };
     match (fs.mkdir("assets")) {
         Result.Ok(nn) => { },
         Result.Err(e) => {
@@ -312,21 +332,19 @@ fn main() -> int {
             return 1;
         },
     }
-    let h = match (fs.open("assets/car.png", "w")) {
-        Result.Ok(handle) => handle,
+    match (fs.write_file_bytes("assets/car.png", data)) {
+        Result.Ok(n) => { },
         Result.Err(e) => {
             eprint("gen_assets: " + e);
             return 1;
         },
-    };
-    fs.write_bytes(h, data);
-    close(h);
-    // The encoder's output must survive std/image's strict decode (CRCs
-    // included) — the same check the game does at splash time.
+    }
+    // The asset must survive std/image's strict decode (CRCs included) and
+    // come back pixel-exact — the same decode the game does at splash time.
     match (image.decode_png(data)) {
         Result.Ok(back) => {
-            if (back.width != img.w || back.height != img.h) {
-                eprint("gen_assets: std/image round-trip size mismatch");
+            if (back.width != W || back.height != H || back.pixels != img.pixels) {
+                eprint("gen_assets: std/image round-trip mismatch");
                 return 1;
             }
         },
@@ -336,12 +354,7 @@ fn main() -> int {
         },
     }
     print(
-        "assets/car.png: "
-            + to_string(data.len())
-            + " bytes, "
-            + to_string(img.w)
-            + "x"
-            + to_string(img.h)
+        "assets/car.png: " + to_string(data.len()) + " bytes, " + to_string(W) + "x" + to_string(H)
     );
     0
 }
