@@ -1,8 +1,10 @@
 // rallyx — a minimal pure-raylang PNG ENCODER: RGBA8 with filter 0 and
 // STORED deflate blocks (no compressor needed), correct CRC-32 and
-// Adler-32. Decoding is std/image's job since M144 — this module writes
-// the game's assets and feeds the differential tests that pin std/image
-// against hand-computed pixels.
+// Adler-32. Decoding is std/image's job since M144 and the game's asset is
+// written by std/image's encode_png since M164 (tools/gen_assets.ray); this
+// module stays as the INDEPENDENT fixture builder (any color type, raw
+// filter bytes, palettes, hand-made chunks) for the differential tests
+// that pin std/image against hand-computed pixels.
 
 // A pixel is (a << 24) | (r << 16) | (g << 8) | b.
 pub fn rgba(r: int, g: int, b: int, a: int) -> int {

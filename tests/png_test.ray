@@ -2,6 +2,7 @@
 // strict decoder — round-trip, every filter type against hand-computed
 // pixels, palette, CRC rejection — plus the sprite line contract and the
 // kitty APC chunking.
+import std/fs;
 import std/image;
 import std/term;
 import png;
@@ -173,8 +174,9 @@ fn sprite_lines_pack_two_pixel_rows_per_cell() {
 
 @test
 fn kitty_apc_is_chunked_and_terminated() {
+    // A single chunk carries no m= key (m=0 is the protocol default).
     let small = sprite.kitty_png(b"tiny");
-    assert(small.contains("_Ga=T,f=100,m=0;"));
+    assert(small.contains("_Ga=T,f=100;"));
     // ~4000 raw bytes → >4096 base64 chars → two chunks: m=1 then m=0.
     var big: [int] = [];
     var i = 0;
@@ -191,7 +193,7 @@ fn kitty_apc_is_chunked_and_terminated() {
 fn kitty_box_pins_the_display_size() {
     // The boxed variant carries the c=/r= cell size in the first chunk only.
     let boxed = sprite.kitty_png_box(b"tiny", 24, 6);
-    assert(boxed.contains("_Ga=T,f=100,c=24,r=6,m=0;"));
+    assert(boxed.contains("_Ga=T,f=100,c=24,r=6;"));
     var big: [int] = [];
     var i = 0;
     while (i < 4000) {
@@ -208,4 +210,54 @@ fn da1_parser_reads_the_terminal_reply() {
     assert_eq(term.parse_device_attributes(b"\x1b[?64;1;4c"), [64, 1, 4]);
     var none: [int] = [];
     assert_eq(term.parse_device_attributes(b"garbage"), none);
+}
+
+@test
+fn std_encoder_agrees_with_the_independent_one() {
+    // std/image's encode_png (compressed, what gen_assets ships) and png.ray's
+    // stored-block encoder must decode to the very same RGBA8 pixels.
+    let pixels = [
+        png.rgba(255, 0, 0, 255),
+        png.rgba(0, 255, 0, 255),
+        png.rgba(0, 0, 255, 255),
+        png.rgba(10, 20, 30, 128),
+        png.rgba(0, 0, 0, 0),
+        png.rgba(200, 100, 50, 255)
+    ];
+    let ours = decoded(3, 2, pixels);
+    let data = match (image.encode_png(ours)) {
+        Result.Ok(d) => d,
+        Result.Err(e) => {
+            panic("encode_png: " + e);
+        },
+    };
+    match (image.decode_png(data)) {
+        Result.Ok(back) => {
+            assert_eq(back.width, 3);
+            assert_eq(back.height, 2);
+            assert(back.pixels == ours.pixels);
+        },
+        Result.Err(e) => {
+            panic("decode_png: " + e);
+        },
+    }
+}
+
+@test
+fn shipped_asset_decodes() {
+    let data = match (fs.read_file_bytes("assets/car.png")) {
+        Result.Ok(d) => d,
+        Result.Err(e) => {
+            panic("assets/car.png: " + e);
+        },
+    };
+    match (image.decode_png(data)) {
+        Result.Ok(img) => {
+            assert_eq(img.width, 72);
+            assert_eq(img.height, 40);
+        },
+        Result.Err(e) => {
+            panic("decode_png: " + e);
+        },
+    }
 }

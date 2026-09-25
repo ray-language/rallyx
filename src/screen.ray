@@ -31,7 +31,7 @@ pub fn camera(g: rally.Game) -> (int, int) {
     if (cy > rally.H - VIEW_H) {
         cy = rally.H - VIEW_H;
     }
-    return (cx, cy);
+    (cx, cy)
 }
 
 fn arrow(d: int) -> string {
