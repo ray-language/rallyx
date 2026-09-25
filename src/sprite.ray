@@ -15,15 +15,25 @@ fn channel(img: image.Image, x: int, y: int, c: int) -> int {
 }
 
 fn fg(img: image.Image, x: int, y: int) -> string {
-    esc() + "[38;2;" + to_string(
-        channel(img, x, y, 0)
-    ) + ";" + to_string(channel(img, x, y, 1)) + ";" + to_string(channel(img, x, y, 2)) + "m"
+    esc()
+        + "[38;2;"
+        + to_string(channel(img, x, y, 0))
+        + ";"
+        + to_string(channel(img, x, y, 1))
+        + ";"
+        + to_string(channel(img, x, y, 2))
+        + "m"
 }
 
 fn bg(img: image.Image, x: int, y: int) -> string {
-    esc() + "[48;2;" + to_string(
-        channel(img, x, y, 0)
-    ) + ";" + to_string(channel(img, x, y, 1)) + ";" + to_string(channel(img, x, y, 2)) + "m"
+    esc()
+        + "[48;2;"
+        + to_string(channel(img, x, y, 0))
+        + ";"
+        + to_string(channel(img, x, y, 1))
+        + ";"
+        + to_string(channel(img, x, y, 2))
+        + "m"
 }
 
 fn opaque(img: image.Image, x: int, y: int) -> bool {

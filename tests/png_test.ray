@@ -48,11 +48,10 @@ fn our_encoder_round_trips_through_std_image() {
 fn std_image_reconstructs_sub_and_up_filters_to_the_hand_computed_pixels() {
     // 2×2 RGB: row 0 uses filter 1 (sub), row 1 uses filter 2 (up).
     let raw = [1, 10, 20, 30, 5, 5, 5, 2, 3, 4, 10, 5, 5, 15];
-    let data = png.signature() + png.ihdr(
-        2,
-        2,
-        2
-    ) + png.chunk("IDAT", png.zlib_store(bytes_of(raw))) + png.chunk("IEND", b"");
+    let data = png.signature()
+        + png.ihdr(2, 2, 2)
+        + png.chunk("IDAT", png.zlib_store(bytes_of(raw)))
+        + png.chunk("IEND", b"");
     match (image.decode_png(data)) {
         Result.Ok(img) => {
             assert_px(img, 0, 10, 20, 30, 255);
@@ -68,11 +67,10 @@ fn std_image_reconstructs_sub_and_up_filters_to_the_hand_computed_pixels() {
 fn std_image_reconstructs_average_and_paeth_to_the_hand_computed_pixels() {
     // 2×2 RGB: row 0 uses filter 3 (average), row 1 uses filter 4 (paeth).
     let raw = [3, 10, 20, 30, 6, 11, 16, 4, 1, 2, 3, 5, 5, 5];
-    let data = png.signature() + png.ihdr(
-        2,
-        2,
-        2
-    ) + png.chunk("IDAT", png.zlib_store(bytes_of(raw))) + png.chunk("IEND", b"");
+    let data = png.signature()
+        + png.ihdr(2, 2, 2)
+        + png.chunk("IDAT", png.zlib_store(bytes_of(raw)))
+        + png.chunk("IEND", b"");
     match (image.decode_png(data)) {
         Result.Ok(img) => {
             assert_px(img, 0, 10, 20, 30, 255);
@@ -88,11 +86,11 @@ fn std_image_reconstructs_average_and_paeth_to_the_hand_computed_pixels() {
 fn std_image_resolves_palettes_through_plte() {
     let plte = bytes_of([255, 0, 0, 0, 255, 0]);
     let raw = [0, 0, 1];
-    let data = png.signature() + png.ihdr(
-        2,
-        1,
-        3
-    ) + png.chunk("PLTE", plte) + png.chunk("IDAT", png.zlib_store(bytes_of(raw))) + png.chunk("IEND", b"");
+    let data = png.signature()
+        + png.ihdr(2, 1, 3)
+        + png.chunk("PLTE", plte)
+        + png.chunk("IDAT", png.zlib_store(bytes_of(raw)))
+        + png.chunk("IEND", b"");
     match (image.decode_png(data)) {
         Result.Ok(img) => {
             assert_eq(img.width, 2);

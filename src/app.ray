@@ -229,7 +229,12 @@ fn splash(caps: term.Capabilities) {
             i = i + 1;
         }
     }
-    out = out + e + "[" + to_string(caprow) + ";3H" + "rallyx — el auto que tira humo · pulsa una tecla";
+    out = out
+        + e
+        + "["
+        + to_string(caprow)
+        + ";3H"
+        + "rallyx — el auto que tira humo · pulsa una tecla";
     write_now(out);
     io.read_timeout(64, 2500);
     write_now(e + "[2J");
@@ -237,7 +242,11 @@ fn splash(caps: term.Capabilities) {
 
 fn event_loop(with_music: bool, caps: term.Capabilities) -> int {
     var empty: [string] = [];
-    let a = App { g: rally.new_game(), prev: empty, pending: b"", hiscore: load_hiscore(), paused: false, quit: false, music: if (with_music) { music.start() } else { music.off() }, danger: false, engine: wsg.ENGINE_RUN, prev_score: 0, prev_lives: 3, prev_over: false };
+    let a = App { g: rally.new_game(), prev: empty, pending: b"", hiscore: load_hiscore(), paused: false, quit: false, music: if (with_music) {
+        music.start()
+    } else {
+        music.off()
+    }, danger: false, engine: wsg.ENGINE_RUN, prev_score: 0, prev_lives: 3, prev_over: false };
     let e = screen.esc();
     write_now(e + "[?1049h" + e + "[?25l" + e + "[2J" + e + "[H");
     splash(caps);
@@ -285,7 +294,12 @@ fn event_loop(with_music: bool, caps: term.Capabilities) -> int {
     music.stop(a.music);
     write_now(e + "[?1049l" + e + "[?25h");
     print(
-        "score " + to_string(a.g.score) + " · round " + to_string(a.g.round) + " · hi " + to_string(a.hiscore)
+        "score "
+            + to_string(a.g.score)
+            + " · round "
+            + to_string(a.g.round)
+            + " · hi "
+            + to_string(a.hiscore)
     );
     0
 }

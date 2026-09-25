@@ -46,7 +46,11 @@ fn main() -> int {
     audio.drain(h);
     close(h);
     print(
-        "played " + to_string(steps) + " steps (" + to_string(steps * wsg.STEP_MS) + " ms) via std/audio"
+        "played "
+            + to_string(steps)
+            + " steps ("
+            + to_string(steps * wsg.STEP_MS)
+            + " ms) via std/audio"
     );
     0
 }
