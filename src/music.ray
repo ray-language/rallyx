@@ -1,8 +1,10 @@
 // rallyx — the reactive music pump on std/audio (M145): a fiber synthesizes
 // WSG steps and writes PCM straight to the device. Pacing note: the device
-// queue absorbs a couple hundred ms before audio.write parks the fiber, so
-// pure backpressure sets the TEMPO but would delay events by the whole
-// queue — the pump keeps a small wall-clock lead (LEAD_MS) instead. That
+// queue absorbs ~200 ms (plain open) before audio.write parks the fiber, and
+// even open_latency with a 20-80 ms hint still queues ~120 ms (measured on
+// raylang 1.27.21, macOS), so pure backpressure sets the TEMPO but would
+// delay events by the whole queue — the pump keeps a small wall-clock lead
+// (LEAD_MS) instead. That
 // lead only has to cover this loop's own jitter (a 20 ms nap, a slow tick),
 // NOT any backend floor: since the raylang audio fix (backend byte_size =
 // exactly what's taken, ~24 ms priming, ~8 ms keepalive, no silence padded
