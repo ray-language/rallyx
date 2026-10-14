@@ -28,16 +28,16 @@ solo calla cuando el coche no está (choque, game over). La melodía es un **hom
 al galope del arcade (la partitura original es de Namco y no se transcribe):
 fanfarria mayor con galope de semicorcheas en el bajo y el giro descendente
 de cierre.
-La clave del pacing, medida con `tools/audio_buf.ray`: la cola del
-dispositivo absorbe **~1.7 s** antes de que `audio.write` aparque la fibra,
-así que la contrapresión pura marca el *tempo* pero retrasaría los eventos
-la cola entera — la fibra mantiene un **adelanto de reloj de pared de
-~100 ms**. Lo que `std/audio` arregla de raíz es el modo de fallo que tuvo
-la era ffplay: el dispositivo reproduce lo recién escrito **inmediatamente**
-tras cualquier hueco (no inserta silencio en una línea de tiempo), así que
-un arranque lento o un underrun se autocura en vez de volverse desfase
-permanente — el reloj de pared vuelve a ser correcto, sin scraping del
-reloj de ffplay.
+La clave del pacing: la fibra abre la salida con `audio.open_latency` a
+30 ms y deja que la contrapresión de `audio.write` marque el *tempo*; como la
+cola es pequeña (~40 ms en macOS, medido con raylang 1.27.50), los eventos
+llegan al oído enseguida. Hasta 1.27.21 la cola no bajaba de ~120 ms (y con
+`audio.open`, de ~1.7 s en las primeras versiones), así que la fibra llevaba
+un adelanto de reloj de pared propio; ya no hace falta. Lo que `std/audio`
+arregló de raíz es el modo de fallo de la era ffplay: el dispositivo
+reproduce lo recién escrito **inmediatamente** tras cualquier hueco (no
+inserta silencio en una línea de tiempo), así que un arranque lento o un
+underrun se autocura en vez de volverse desfase permanente.
 
 Imágenes con la superficie M143/M144: el decode es **`std/image`**
 (`decode_png` estricto — CRC por chunk, tipos 0/2/3/4/6, tRNS) y el dibujo
@@ -195,7 +195,11 @@ La disciplina de raygame (Tetris), con un reloj más y una cámara:
    existen `audio.open_latency` y `audio.played_ms`, pero medido en macOS
    (1.27.11) el hint no acota la cola a 22050 Hz mono: con 30 ms, `write`
    sigue absorbiendo ~1.6 s antes de aparcar. El adelanto de reloj de pared
-   se queda.
+   se queda. **[RESUELTO — raylang 1.27.50]**: la cola sigue la pista (30 ms
+   → ~40 ms en cola, 50 → ~53); la fibra pasa a pura contrapresión con
+   `open_latency(…, 30)`. Con `RAY_AUDIO_TRACE=1` una partida da
+   `fade-outs 1, gaps 0` (solo la cola final), frente a 7–12 fade-outs
+   (underruns) con el adelanto de reloj de 30 ms.
 
 ## Desarrollo
 

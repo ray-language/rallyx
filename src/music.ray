@@ -1,27 +1,18 @@
 // rallyx — the reactive music pump on std/audio (M145): a fiber synthesizes
-// WSG steps and writes PCM straight to the device. Pacing note: the device
-// queue absorbs ~200 ms (plain open) before audio.write parks the fiber, and
-// even open_latency with a 20-80 ms hint still queues ~120 ms (measured on
-// raylang 1.27.21, macOS), so pure backpressure sets the TEMPO but would
-// delay events by the whole queue — the pump keeps a small wall-clock lead
-// (LEAD_MS) instead. That
-// lead only has to cover this loop's own jitter (a 20 ms nap, a slow tick),
-// NOT any backend floor: since the raylang audio fix (backend byte_size =
-// exactly what's taken, ~24 ms priming, ~8 ms keepalive, no silence padded
-// into the 1x timeline), a slow start or an underrun heals itself in a
-// frame or two instead of becoming permanent lag. So the lead is small on
-// purpose — bump it only if you hear underruns, not to fight latency.
-// Wall-clock pacing is now CORRECT here, no playback-clock scraping needed.
+// WSG steps and writes PCM straight to the device. Backpressure is the
+// pacing: the output is opened with a small latency hint (LATENCY_MS), so
+// audio.write parks once ~that much is queued — the device sets the TEMPO
+// and game events reach the ear after ~the hint, not a 200 ms default queue
+// (measured on raylang 1.27.50, macOS: a 30 ms hint queues ~40 ms). This
+// replaces the wall-clock lead the pump kept while open_latency still queued
+// ~120 ms for any small hint. Raise the hint only if you hear underruns.
 // Game events arrive through a channel; drain+close end the fiber without
 // clipping the tail.
 import std/audio;
-import std/time;
 import wsg;
 
-// ~half a sub-step of slack over real time — enough to ride out one 20 ms
-// nap or a slow tick, small enough that events reach the ear promptly. The
-// backend no longer accumulates silence, so this no longer has to grow.
-const LEAD_MS: int = 30;
+// Total queued between write and the speaker (std/audio accepts 20-1000).
+const LATENCY_MS: int = 30;
 
 pub struct Music {
     ch: Channel<int>,
@@ -35,7 +26,7 @@ pub fn off() -> Music {
 
 pub fn start() -> Music {
     let ch: Channel<int> = Channel.bounded(32);
-    match (audio.open(wsg.RATE, 1)) {
+    match (audio.open_latency(wsg.RATE, 1, LATENCY_MS)) {
         Result.Ok(h) => {
             spawn(fn() {
                 pump(h, ch);
@@ -63,8 +54,6 @@ pub fn stop(m: Music) {
 
 fn pump(h: int, ch: Channel<int>) {
     let t = wsg.new_tracker();
-    let t0 = time.monotonic();
-    var written = 0;
     var running = true;
     while (running) {
         // Apply every queued event before synthesizing the next sub-step.
@@ -86,20 +75,13 @@ fn pump(h: int, ch: Channel<int>) {
             }
         }
         if (running) {
-            let ahead = written - (time.monotonic() - t0);
-            if (ahead > LEAD_MS) {
-                // Short naps keep the events fresh.
-                time.sleep(20);
-            } else {
-                match (audio.write(h, wsg.tick(t))) {
-                    Result.Ok(n) => {
-                        written = written + wsg.SUB_MS;
-                    },
-                    Result.Err(dead) => {
-                        // Device gone: fall silent, don't crash the game.
-                        running = false;
-                    },
-                }
+            // Parks while ~LATENCY_MS is queued: the device sets the tempo.
+            match (audio.write(h, wsg.tick(t))) {
+                Result.Ok(n) => {},
+                Result.Err(dead) => {
+                    // Device gone: fall silent, don't crash the game.
+                    running = false;
+                },
             }
         }
     }
